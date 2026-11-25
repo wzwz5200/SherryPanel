@@ -97,11 +97,20 @@ func Load(path string) AppConfig {
 	if strings.EqualFold(os.Getenv("DRY_RUN"), "true") || os.Getenv("DRY_RUN") == "1" {
 		cfg.DryRun = true
 	}
+	generated := false
 	if cfg.AdminPassword == "" {
 		cfg.AdminPassword = "adm-" + randomHex(6)
+		generated = true
 	}
 	if cfg.SessionSecret == "" {
 		cfg.SessionSecret = randomHex(32)
+		generated = true
+	}
+	// Persist first-run generated password & secret so it stays stable across restarts
+	if generated && strings.TrimSpace(os.Getenv("ADMIN_PASSWORD")) == "" {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			_ = Save(path, cfg)
+		}
 	}
 	return cfg
 }

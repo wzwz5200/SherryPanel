@@ -234,7 +234,7 @@
               <div v-for="g in filteredGloves" :key="g.weapon_defindex + '-' + g.paint" class="card" :class="{ equipped: isGloveEquipped(g) }" @click="saveGlove(g)">
                 <span v-if="isGloveEquipped(g)" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
                 <div class="card-art"><img v-if="g.image" :src="g.image" :alt="g.name" loading="lazy" /><span v-else style="font-size:13px;color:var(--label-tertiary);">默认原版</span></div>
-                <div class="card-title">{{ g.name }}</div>
+                <div class="card-title">{{ g.name }}</div><div v-if="g.name_en && g.name_en !== g.name" class="card-subtitle">{{ g.name_en }}</div>
               </div>
             </div>
           </section>
@@ -251,7 +251,7 @@
               <div v-for="a in filteredAgents" :key="a.team + '-' + a.model" class="card" :class="{ equipped: currentAgentModel === a.model }" @click="saveAgent(a)">
                 <span v-if="currentAgentModel === a.model" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
                 <div class="card-art"><img v-if="a.image" :src="a.image" :alt="a.name" loading="lazy" /><span v-else style="font-size:13px;color:var(--label-tertiary);">默认探员</span></div>
-                <div class="card-title">{{ a.name }}</div>
+                <div class="card-title">{{ a.name }}</div><div v-if="a.name_en && a.name_en !== a.name" class="card-subtitle">{{ a.name_en }}</div>
               </div>
             </div>
           </section>
@@ -262,7 +262,7 @@
               <div v-for="m in filteredMusic" :key="m.id" class="card" :class="{ equipped: currentMusicId === m.id }" @click="saveMusic(m.id)">
                 <span v-if="currentMusicId === m.id" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
                 <div class="card-art"><img v-if="m.image" :src="m.image" :alt="m.name" loading="lazy" /><span v-else style="font-size:13px;color:var(--label-tertiary);">默认原声</span></div>
-                <div class="card-title">{{ m.name }}</div>
+                <div class="card-title">{{ m.name }}</div><div v-if="m.name_en && m.name_en !== m.name" class="card-subtitle">{{ m.name_en }}</div>
               </div>
             </div>
           </section>
@@ -375,7 +375,7 @@ const filteredWeapons = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   return catalog.value.weapons.filter(w =>
     (weaponCat.value === 'all' || w.category === weaponCat.value) &&
-    (!q || w.display_name.toLowerCase().includes(q) || w.weapon_name.toLowerCase().includes(q) || weaponCardSkinName(w).toLowerCase().includes(q))
+    (!q || w.display_name.toLowerCase().includes(q) || w.weapon_name.toLowerCase().includes(q) || weaponCardSkinName(w).toLowerCase().includes(q) || (w.display_name_en || '').toLowerCase().includes(q))
   )
 })
 const currentKnifeName = computed(() => teamMode.value === 3 ? loadout.value.knife_ct : loadout.value.knife_t)
@@ -386,11 +386,11 @@ const currentKnifeLabel = computed(() => {
 })
 const filteredKnives = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  return catalog.value.knives.filter(k => !q || k.display_name.toLowerCase().includes(q) || k.weapon_name.toLowerCase().includes(q))
+  return catalog.value.knives.filter(k => !q || k.display_name.toLowerCase().includes(q) || k.weapon_name.toLowerCase().includes(q) || (k.display_name_en || '').toLowerCase().includes(q))
 })
 const filteredGloves = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  return catalog.value.gloves.filter(g => !q || g.name.toLowerCase().includes(q))
+  return catalog.value.gloves.filter(g => !q || g.name.toLowerCase().includes(q) || (g.name_en || '').toLowerCase().includes(q))
 })
 function isGloveEquipped(g) {
   const curDef = teamMode.value === 3 ? loadout.value.glove_ct : loadout.value.glove_t
@@ -402,17 +402,17 @@ function isGloveEquipped(g) {
 const currentAgentModel = computed(() => agentTeam.value === 3 ? (loadout.value.agent_ct || '') : (loadout.value.agent_t || ''))
 const filteredAgents = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  return catalog.value.agents.filter(a => a.team === agentTeam.value && (!q || a.name.toLowerCase().includes(q)))
+  return catalog.value.agents.filter(a => a.team === agentTeam.value && (!q || a.name.toLowerCase().includes(q) || (a.name_en || '').toLowerCase().includes(q)))
 })
 const currentMusicId = computed(() => teamMode.value === 3 ? (loadout.value.music_ct || 0) : (loadout.value.music_t || 0))
 const filteredMusic = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  return catalog.value.music.filter(m => !q || m.name.toLowerCase().includes(q))
+  return catalog.value.music.filter(m => !q || m.name.toLowerCase().includes(q) || (m.name_en || '').toLowerCase().includes(q))
 })
 const currentPinId = computed(() => teamMode.value === 3 ? (loadout.value.pin_ct || 0) : (loadout.value.pin_t || 0))
 const filteredPins = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  const list = catalog.value.pins.filter(p => !q || p.name.toLowerCase().includes(q))
+  const list = catalog.value.pins.filter(p => !q || p.name.toLowerCase().includes(q) || (p.name_en || '').toLowerCase().includes(q))
   return q ? list.slice(0, 200) : list.slice(0, 120)
 })
 

@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"embed"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,6 +9,9 @@ import (
 	"strconv"
 	"strings"
 )
+
+//go:embed embedded/*.json
+var embeddedCatalogFS embed.FS
 
 type RawSkin struct {
 	WeaponDefIndex int    `json:"weapon_defindex"`
@@ -18,49 +22,57 @@ type RawSkin struct {
 }
 
 type SkinOption struct {
-	PaintID   int    `json:"paint_id"`
-	Name      string `json:"name"`
-	ShortName string `json:"short_name"`
-	Image     string `json:"image"`
+	PaintID     int    `json:"paint_id"`
+	Name        string `json:"name"`
+	NameEN      string `json:"name_en"`
+	ShortName   string `json:"short_name"`
+	ShortNameEN string `json:"short_name_en"`
+	Image       string `json:"image"`
 }
 
 type WeaponGroup struct {
-	DefIndex     int          `json:"defindex"`
-	WeaponName   string       `json:"weapon_name"`
-	DisplayName  string       `json:"display_name"`
-	Category     string       `json:"category"`
-	DefaultImage string       `json:"default_image"`
-	Skins        []SkinOption `json:"skins"`
+	DefIndex      int          `json:"defindex"`
+	WeaponName    string       `json:"weapon_name"`
+	DisplayName   string       `json:"display_name"`
+	DisplayNameEN string       `json:"display_name_en"`
+	Category      string       `json:"category"`
+	DefaultImage  string       `json:"default_image"`
+	Skins         []SkinOption `json:"skins"`
 }
 
 type KnifeType struct {
-	DefIndex    int    `json:"defindex"`
-	WeaponName  string `json:"weapon_name"`
-	DisplayName string `json:"display_name"`
-	Image       string `json:"image"`
+	DefIndex      int    `json:"defindex"`
+	WeaponName    string `json:"weapon_name"`
+	DisplayName   string `json:"display_name"`
+	DisplayNameEN string `json:"display_name_en"`
+	Image         string `json:"image"`
 }
 
 type GloveItem struct {
 	DefIndex int    `json:"weapon_defindex"`
 	PaintID  int    `json:"paint"`
 	Name     string `json:"name"`
+	NameEN   string `json:"name_en"`
 	Image    string `json:"image"`
 }
 
 type AgentItem struct {
-	Team  int    `json:"team"`
-	Model string `json:"model"`
-	Name  string `json:"name"`
-	Image string `json:"image"`
+	Team   int    `json:"team"`
+	Model  string `json:"model"`
+	Name   string `json:"name"`
+	NameEN string `json:"name_en"`
+	Image  string `json:"image"`
 }
 
 type SimpleItem struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Image string `json:"image"`
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	NameEN string `json:"name_en"`
+	Image  string `json:"image"`
 }
 
 type Catalog struct {
+	Source  string        `json:"source"`
 	Weapons []WeaponGroup `json:"weapons"`
 	Knives  []KnifeType   `json:"knives"`
 	Gloves  []GloveItem   `json:"gloves"`
@@ -83,9 +95,19 @@ func toInt(v any) int {
 	}
 }
 
+func readCatalogFile(dataDir, filename string) ([]byte, bool, error) {
+	if dataDir != "" {
+		if b, err := os.ReadFile(filepath.Join(dataDir, filename)); err == nil && len(b) > 0 {
+			return b, false, nil
+		}
+	}
+	b, err := embeddedCatalogFS.ReadFile("embedded/" + filename)
+	return b, true, err
+}
+
 func rewriteImage(imgURL, imgDir string) string {
-	if imgURL == "" {
-		return ""
+	if imgURL == "" || imgDir == "" {
+		return imgURL
 	}
 	const marker = "/website/img/"
 	if idx := strings.Index(imgURL, marker); idx >= 0 {
@@ -129,39 +151,75 @@ func weaponOrder(def int) int {
 	return 100 + def
 }
 
-func Load(dataDir, imgDir string) (*Catalog, error) {
-	cat := &Catalog{}
+func splitName(full string, isDefault bool, defaultLabel string) (string, string) {
+	parts := strings.SplitN(full, "|", 2)
+	disp := strings.TrimSpace(parts[0])
+	short := full
+	if len(parts) == 2 {
+		short = strings.TrimSpace(parts[1])
+	}
+	if isDefault {
+		short = defaultLabel
+	}
+	return disp, short
+}
 
-	// 1. Skins + Weapons + Knives
-	skinBytes, err := os.ReadFile(filepath.Join(dataDir, "skins_zh-CN.json"))
+func Load(dataDir, imgDir string) (*Catalog, error) {
+	cat := &Catalog{Source: "disk"}
+
+	// 1. Skins + Weapons + Knives (zh-CN + en)
+	skinZHBytes, fromEmbed, err := readCatalogFile(dataDir, "skins_zh-CN.json")
 	if err != nil {
 		return nil, err
 	}
-	var rawSkins []RawSkin
-	if err := json.Unmarshal(skinBytes, &rawSkins); err != nil {
+	if fromEmbed {
+		cat.Source = "embedded"
+	}
+	var rawSkinsZH, rawSkinsEN []RawSkin
+	if err := json.Unmarshal(skinZHBytes, &rawSkinsZH); err != nil {
 		return nil, err
 	}
+	enSkinMap := map[string]RawSkin{}
+	enWeaponDisp := map[int]string{}
+	if bEN, _, err := readCatalogFile(dataDir, "skins_en.json"); err == nil && json.Unmarshal(bEN, &rawSkinsEN) == nil {
+		for _, s := range rawSkinsEN {
+			pid := toInt(s.Paint)
+			k := strconv.Itoa(s.WeaponDefIndex) + ":" + strconv.Itoa(pid)
+			enSkinMap[k] = s
+			if _, ok := enWeaponDisp[s.WeaponDefIndex]; !ok {
+				d, _ := splitName(s.PaintName, pid == 0, "Default")
+				enWeaponDisp[s.WeaponDefIndex] = d
+			}
+		}
+	}
+
 	wMap := map[int]*WeaponGroup{}
-	for _, s := range rawSkins {
+	for _, s := range rawSkinsZH {
 		paintID := toInt(s.Paint)
 		img := rewriteImage(s.Image, imgDir)
-		parts := strings.SplitN(s.PaintName, "|", 2)
-		disp := strings.TrimSpace(parts[0])
-		short := s.PaintName
-		if len(parts) == 2 {
-			short = strings.TrimSpace(parts[1])
+		dispZH, shortZH := splitName(s.PaintName, paintID == 0, "默认原版")
+
+		enKey := strconv.Itoa(s.WeaponDefIndex) + ":" + strconv.Itoa(paintID)
+		nameEN := s.PaintName
+		shortEN := shortZH
+		if es, ok := enSkinMap[enKey]; ok {
+			nameEN = es.PaintName
+			_, shortEN = splitName(es.PaintName, paintID == 0, "Default")
 		}
-		if paintID == 0 {
-			short = "默认原版"
+		dispEN := enWeaponDisp[s.WeaponDefIndex]
+		if dispEN == "" {
+			dispEN = dispZH
 		}
+
 		wg, ok := wMap[s.WeaponDefIndex]
 		if !ok {
 			wg = &WeaponGroup{
-				DefIndex:     s.WeaponDefIndex,
-				WeaponName:   s.WeaponName,
-				DisplayName:  disp,
-				Category:     weaponCategory(s.WeaponDefIndex),
-				DefaultImage: img,
+				DefIndex:      s.WeaponDefIndex,
+				WeaponName:    s.WeaponName,
+				DisplayName:   dispZH,
+				DisplayNameEN: dispEN,
+				Category:      weaponCategory(s.WeaponDefIndex),
+				DefaultImage:  img,
 			}
 			wMap[s.WeaponDefIndex] = wg
 		}
@@ -169,10 +227,12 @@ func Load(dataDir, imgDir string) (*Catalog, error) {
 			wg.DefaultImage = img
 		}
 		wg.Skins = append(wg.Skins, SkinOption{
-			PaintID:   paintID,
-			Name:      s.PaintName,
-			ShortName: short,
-			Image:     img,
+			PaintID:     paintID,
+			Name:        s.PaintName,
+			NameEN:      nameEN,
+			ShortName:   shortZH,
+			ShortNameEN: shortEN,
+			Image:       img,
 		})
 	}
 	for _, wg := range wMap {
@@ -188,10 +248,11 @@ func Load(dataDir, imgDir string) (*Catalog, error) {
 		cat.Weapons = append(cat.Weapons, *wg)
 		if wg.DefIndex >= 500 {
 			cat.Knives = append(cat.Knives, KnifeType{
-				DefIndex:    wg.DefIndex,
-				WeaponName:  wg.WeaponName,
-				DisplayName: wg.DisplayName,
-				Image:       wg.DefaultImage,
+				DefIndex:      wg.DefIndex,
+				WeaponName:    wg.WeaponName,
+				DisplayName:   wg.DisplayName,
+				DisplayNameEN: wg.DisplayNameEN,
+				Image:         wg.DefaultImage,
 			})
 		}
 	}
@@ -202,94 +263,145 @@ func Load(dataDir, imgDir string) (*Catalog, error) {
 		return cat.Knives[i].DefIndex < cat.Knives[j].DefIndex
 	})
 
-	// 2. Gloves
-	if b, err := os.ReadFile(filepath.Join(dataDir, "gloves_zh-CN.json")); err == nil {
-		var raw []struct {
-			DefIndex  int    `json:"weapon_defindex"`
-			Paint     any    `json:"paint"`
-			Image     string `json:"image"`
-			PaintName string `json:"paint_name"`
-		}
+	// 2. Gloves (zh-CN + en)
+	type rawGlove struct {
+		DefIndex  int    `json:"weapon_defindex"`
+		Paint     any    `json:"paint"`
+		Image     string `json:"image"`
+		PaintName string `json:"paint_name"`
+	}
+	enGloveMap := map[string]string{}
+	if b, _, err := readCatalogFile(dataDir, "gloves_en.json"); err == nil {
+		var raw []rawGlove
 		if json.Unmarshal(b, &raw) == nil {
 			for _, g := range raw {
-				name := g.PaintName
+				enGloveMap[strconv.Itoa(g.DefIndex)+":"+strconv.Itoa(toInt(g.Paint))] = g.PaintName
+			}
+		}
+	}
+	if b, _, err := readCatalogFile(dataDir, "gloves_zh-CN.json"); err == nil {
+		var raw []rawGlove
+		if json.Unmarshal(b, &raw) == nil {
+			for _, g := range raw {
+				pid := toInt(g.Paint)
+				nameZH := g.PaintName
+				nameEN := enGloveMap[strconv.Itoa(g.DefIndex)+":"+strconv.Itoa(pid)]
 				if g.DefIndex == 0 {
-					name = "默认原版手套"
+					nameZH = "默认原版手套"
+					nameEN = "Default Gloves"
+				}
+				if nameEN == "" {
+					nameEN = nameZH
 				}
 				cat.Gloves = append(cat.Gloves, GloveItem{
 					DefIndex: g.DefIndex,
-					PaintID:  toInt(g.Paint),
-					Name:     name,
+					PaintID:  pid,
+					Name:     nameZH,
+					NameEN:   nameEN,
 					Image:    rewriteImage(g.Image, imgDir),
 				})
 			}
 		}
 	}
 
-	// 3. Agents
-	if b, err := os.ReadFile(filepath.Join(dataDir, "agents_zh-CN.json")); err == nil {
-		var raw []struct {
-			Team      int    `json:"team"`
-			Image     string `json:"image"`
-			Model     string `json:"model"`
-			AgentName string `json:"agent_name"`
+	// 3. Agents (zh-CN + en)
+	type rawAgent struct {
+		Team      int    `json:"team"`
+		Image     string `json:"image"`
+		Model     string `json:"model"`
+		AgentName string `json:"agent_name"`
+	}
+	enAgentMap := map[string]string{}
+	if b, _, err := readCatalogFile(dataDir, "agents_en.json"); err == nil {
+		var raw []rawAgent
+		if json.Unmarshal(b, &raw) == nil {
+			for _, a := range raw {
+				enAgentMap[strconv.Itoa(a.Team)+":"+a.Model] = a.AgentName
+			}
 		}
+	}
+	if b, _, err := readCatalogFile(dataDir, "agents_zh-CN.json"); err == nil {
+		var raw []rawAgent
 		if json.Unmarshal(b, &raw) == nil {
 			for _, a := range raw {
 				model := a.Model
-				name := a.AgentName
+				nameZH := a.AgentName
+				nameEN := enAgentMap[strconv.Itoa(a.Team)+":"+a.Model]
 				if model == "null" || model == "" {
 					model = ""
 					if a.Team == 2 {
-						name = "默认 T 阵营探员"
+						nameZH = "默认 T 阵营探员"
+						nameEN = "Default T Agent"
 					} else {
-						name = "默认 CT 阵营探员"
+						nameZH = "默认 CT 阵营探员"
+						nameEN = "Default CT Agent"
 					}
 				}
+				if nameEN == "" {
+					nameEN = nameZH
+				}
 				cat.Agents = append(cat.Agents, AgentItem{
-					Team:  a.Team,
-					Model: model,
-					Name:  name,
-					Image: rewriteImage(a.Image, imgDir),
+					Team:   a.Team,
+					Model:  model,
+					Name:   nameZH,
+					NameEN: nameEN,
+					Image:  rewriteImage(a.Image, imgDir),
 				})
 			}
 		}
 	}
 
-	// 4. Music
-	if b, err := os.ReadFile(filepath.Join(dataDir, "music_zh-CN.json")); err == nil {
-		var raw []struct {
-			ID    any    `json:"id"`
-			Name  string `json:"name"`
-			Image string `json:"image"`
-		}
+	// 4. Music (zh-CN + en)
+	type rawSimple struct {
+		ID    any    `json:"id"`
+		Name  string `json:"name"`
+		Image string `json:"image"`
+	}
+	enMusicMap := map[int]string{}
+	if b, _, err := readCatalogFile(dataDir, "music_en.json"); err == nil {
+		var raw []rawSimple
 		if json.Unmarshal(b, &raw) == nil {
-			cat.Music = append(cat.Music, SimpleItem{ID: 0, Name: "默认音乐盒"})
 			for _, m := range raw {
-				cat.Music = append(cat.Music, SimpleItem{
-					ID:    toInt(m.ID),
-					Name:  m.Name,
-					Image: rewriteImage(m.Image, imgDir),
-				})
+				enMusicMap[toInt(m.ID)] = m.Name
+			}
+		}
+	}
+	if b, _, err := readCatalogFile(dataDir, "music_zh-CN.json"); err == nil {
+		var raw []rawSimple
+		if json.Unmarshal(b, &raw) == nil {
+			cat.Music = append(cat.Music, SimpleItem{ID: 0, Name: "默认音乐盒", NameEN: "Default Music Kit"})
+			for _, m := range raw {
+				id := toInt(m.ID)
+				en := enMusicMap[id]
+				if en == "" {
+					en = m.Name
+				}
+				cat.Music = append(cat.Music, SimpleItem{ID: id, Name: m.Name, NameEN: en, Image: rewriteImage(m.Image, imgDir)})
 			}
 		}
 	}
 
-	// 5. Pins (Collectibles)
-	if b, err := os.ReadFile(filepath.Join(dataDir, "collectibles_zh-CN.json")); err == nil {
-		var raw []struct {
-			ID    any    `json:"id"`
-			Name  string `json:"name"`
-			Image string `json:"image"`
-		}
+	// 5. Pins / Collectibles (zh-CN + en)
+	enPinMap := map[int]string{}
+	if b, _, err := readCatalogFile(dataDir, "collectibles_en.json"); err == nil {
+		var raw []rawSimple
 		if json.Unmarshal(b, &raw) == nil {
-			cat.Pins = append(cat.Pins, SimpleItem{ID: 0, Name: "不佩戴徽章"})
 			for _, p := range raw {
-				cat.Pins = append(cat.Pins, SimpleItem{
-					ID:    toInt(p.ID),
-					Name:  p.Name,
-					Image: rewriteImage(p.Image, imgDir),
-				})
+				enPinMap[toInt(p.ID)] = p.Name
+			}
+		}
+	}
+	if b, _, err := readCatalogFile(dataDir, "collectibles_zh-CN.json"); err == nil {
+		var raw []rawSimple
+		if json.Unmarshal(b, &raw) == nil {
+			cat.Pins = append(cat.Pins, SimpleItem{ID: 0, Name: "不佩戴徽章", NameEN: "No Pin"})
+			for _, p := range raw {
+				id := toInt(p.ID)
+				en := enPinMap[id]
+				if en == "" {
+					en = p.Name
+				}
+				cat.Pins = append(cat.Pins, SimpleItem{ID: id, Name: p.Name, NameEN: en, Image: rewriteImage(p.Image, imgDir)})
 			}
 		}
 	}

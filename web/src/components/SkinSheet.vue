@@ -21,7 +21,7 @@
           <div class="preview-stage">
             <img :src="selectedSkin?.image || weapon.default_image" :alt="weapon.display_name" />
             <div style="font-size:15px;font-weight:600;margin-top:10px;letter-spacing:-0.15px;">
-              {{ selectedSkin?.short_name || '默认原版' }}
+              {{ selectedSkin?.short_name || '默认原版' }}<div v-if='selectedSkin?.short_name_en && selectedSkin.short_name_en !== selectedSkin.short_name' style='font-size:12px;color:var(--label-secondary);font-weight:400;margin-top:2px;'>{{ selectedSkin.short_name_en }}</div>
             </div>
             <div class="tabular" style="font-size:12px;color:var(--label-secondary);margin-top:2px;">
               涂装编号 #{{ form.paintId }}
@@ -83,7 +83,7 @@
             <input
               v-model="search"
               style="width:100%;"
-              placeholder="搜索涂装名称或编号（如 二西莫夫、火神、巨龙传说、多普勒）"
+              placeholder="中英文搜索涂装或编号（如 火神 / Vulcan / Doppler / 巨龙传说）"
             />
             <button v-if="search" class="search-clear" @click="search = ''">×</button>
           </div>
@@ -98,6 +98,7 @@
             >
               <img :src="s.image" :alt="s.short_name" loading="lazy" />
               <div class="skin-tile-name" :title="s.name">{{ s.short_name }}</div>
+              <div v-if="s.short_name_en && s.short_name_en !== s.short_name" style="font-size:10.5px;color:var(--label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ s.short_name_en }}</div>
             </div>
           </div>
         </div>
@@ -144,6 +145,8 @@ const filteredSkins = computed(() => {
   return props.weapon.skins.filter(s =>
     s.name.toLowerCase().includes(q) ||
     s.short_name.toLowerCase().includes(q) ||
+    (s.name_en || '').toLowerCase().includes(q) ||
+    (s.short_name_en || '').toLowerCase().includes(q) ||
     String(s.paint_id).includes(q)
   )
 })
