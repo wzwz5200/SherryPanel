@@ -64,17 +64,20 @@ sudo systemctl status cs2-skins-web.service
 
 无需 WSL、无需 Bash 或 Python，全部由单文件 `cs2-panel-windows-amd64.exe` 原生驱动：
 
-1. **准备数据库**：在 Windows 安装 MariaDB（或连接远程 MariaDB），创建 `cs2_weaponpaints` 数据库。
+1. **零配置一键开服（新手推荐）**：
+   直接双击运行 `cs2-panel-windows-amd64.exe`，程序会自动生成并打印管理员密码（同时保存至 `panel-config.json`），内嵌中英双语皮肤数据无需额外下载。
+   打开控制台打印的 `http://127.0.0.1:9090` 管理地址登录后，会自动弹出 **「新手引导」**：
+   - 点击 **「一键全自动安装全部组件」**，程序会自动下载官方 **便携版 MariaDB 11.4 + SteamCMD + CS2 服务端 + 全皮肤插件栈 + 内置 SkinBind v1.2.0**；
+   - 自动创建 `cs2_weaponpaints` 库与 7 张数据表、自动写入 `WeaponPaints.json` 与 `SkinBind.json`、自动配置 RCON 密钥；
+   - 玩家在网页保存任意涂装/匕首/手套/探员/音乐盒/徽章时，面板通过 Source 2 RCON 自动触发 `wp_refresh` **即时刷新游戏内皮肤，无需手动输入 `!wp`**。
 2. **安全演练测试（不下载 71 GB 服务端）**：
    ```powershell
    $env:DRY_RUN = "true"
-   $env:ADMIN_PASSWORD = "your-strong-password"
    .\cs2-panel-windows-amd64.exe
    ```
-   打开 `http://127.0.0.1:9090` 登录后，可在「控制台」查看通过 Windows `kernel32.dll` 原生获取的磁盘/内存状态，并在「部署与更新」演练 Windows 安装流程。
-3. **正式部署**：
+   打开 `http://127.0.0.1:9090` 使用控制台打印的自动密码登录，即可无损演练全自动数据库/SteamCMD/CS2/插件部署流程。
+3. **命令行交互向导（可选）**：
    ```powershell
-   # 运行交互向导生成 panel-config.json，并可选自动下载 steamcmd.zip、CS2 与 Windows 版插件栈
    .\cs2-panel-windows-amd64.exe setup
 
    # 启动服务（默认管理端绑定 127.0.0.1:9090，玩家端绑定 0.0.0.0:8080）

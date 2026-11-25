@@ -3,9 +3,10 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"net"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	gomysql "github.com/go-sql-driver/mysql"
 )
 
 type Store struct {
@@ -24,20 +25,20 @@ type SkinRecord struct {
 }
 
 type Loadout struct {
-	SteamID string                `json:"steamid"`
-	Skins   map[int]SkinRecord    `json:"skins"`    // keyed by team*100000 + defindex? No, split by team!
-	SkinsT  map[int]SkinRecord    `json:"skins_t"`  // team 2
-	SkinsCT map[int]SkinRecord    `json:"skins_ct"` // team 3
-	KnifeT  string                `json:"knife_t"`
-	KnifeCT string                `json:"knife_ct"`
-	GloveT  int                   `json:"glove_t"`
-	GloveCT int                   `json:"glove_ct"`
-	AgentT  string                `json:"agent_t"`
-	AgentCT string                `json:"agent_ct"`
-	MusicT  int                   `json:"music_t"`
-	MusicCT int                   `json:"music_ct"`
-	PinT    int                   `json:"pin_t"`
-	PinCT   int                   `json:"pin_ct"`
+	SteamID string             `json:"steamid"`
+	Skins   map[int]SkinRecord `json:"skins"`    // unused compatibility field
+	SkinsT  map[int]SkinRecord `json:"skins_t"`  // team 2
+	SkinsCT map[int]SkinRecord `json:"skins_ct"` // team 3
+	KnifeT  string             `json:"knife_t"`
+	KnifeCT string             `json:"knife_ct"`
+	GloveT  int                `json:"glove_t"`
+	GloveCT int                `json:"glove_ct"`
+	AgentT  string             `json:"agent_t"`
+	AgentCT string             `json:"agent_ct"`
+	MusicT  int                `json:"music_t"`
+	MusicCT int                `json:"music_ct"`
+	PinT    int                `json:"pin_t"`
+	PinCT   int                `json:"pin_ct"`
 }
 
 func Open(dsn string) (*Store, error) {
@@ -49,9 +50,105 @@ func Open(dsn string) (*Store, error) {
 	conn.SetMaxIdleConns(5)
 	conn.SetConnMaxLifetime(5 * time.Minute)
 	if err := conn.Ping(); err != nil {
+		_ = conn.Close()
 		return nil, err
 	}
 	return &Store{SQL: conn}, nil
+}
+
+func ParseDSN(dsn string) (user, pass, host, port, dbName string, ok bool) {
+	cfg, err := gomysql.ParseDSN(dsn)
+	if err != nil {
+		return "", "", "", "", "", false
+	}
+	host = "127.0.0.1"
+	port = "3306"
+	if cfg.Addr != "" {
+		if h, p, err := net.SplitHostPort(cfg.Addr); err == nil {
+			if h != "" {
+				host = h
+			}
+			if p != "" {
+				port = p
+			}
+		} else {
+			host = cfg.Addr
+		}
+	}
+	dbName = cfg.DBName
+	if dbName == "" {
+		dbName = "cs2_weaponpaints"
+	}
+	return cfg.User, cfg.Passwd, host, port, dbName, true
+}
+
+func (s *Store) EnsureSchema() error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS wp_player_skins (
+			steamid varchar(18) NOT NULL,
+			weapon_team int(1) NOT NULL,
+			weapon_defindex int(6) NOT NULL,
+			weapon_paint_id int(6) NOT NULL,
+			weapon_wear float NOT NULL DEFAULT 0.000001,
+			weapon_seed int(16) NOT NULL DEFAULT 0,
+			weapon_nametag varchar(128) DEFAULT NULL,
+			weapon_stattrak tinyint(1) NOT NULL DEFAULT 0,
+			weapon_stattrak_count int(10) NOT NULL DEFAULT 0,
+			weapon_sticker_0 varchar(128) NOT NULL DEFAULT '0;0;0;0;0;0;0',
+			weapon_sticker_1 varchar(128) NOT NULL DEFAULT '0;0;0;0;0;0;0',
+			weapon_sticker_2 varchar(128) NOT NULL DEFAULT '0;0;0;0;0;0;0',
+			weapon_sticker_3 varchar(128) NOT NULL DEFAULT '0;0;0;0;0;0;0',
+			weapon_sticker_4 varchar(128) NOT NULL DEFAULT '0;0;0;0;0;0;0',
+			weapon_keychain varchar(128) NOT NULL DEFAULT '0;0;0;0;0',
+			UNIQUE KEY steamid (steamid, weapon_team, weapon_defindex)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`,
+		`CREATE TABLE IF NOT EXISTS wp_player_knife (
+			steamid varchar(18) NOT NULL,
+			weapon_team int(1) NOT NULL,
+			knife varchar(64) NOT NULL,
+			UNIQUE KEY steamid (steamid, weapon_team)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`,
+		`CREATE TABLE IF NOT EXISTS wp_player_gloves (
+			steamid varchar(18) NOT NULL,
+			weapon_team int(1) NOT NULL,
+			weapon_defindex int(11) NOT NULL,
+			UNIQUE KEY steamid (steamid, weapon_team)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`,
+		`CREATE TABLE IF NOT EXISTS wp_player_agents (
+			steamid varchar(18) NOT NULL,
+			agent_ct varchar(64) DEFAULT NULL,
+			agent_t varchar(64) DEFAULT NULL,
+			UNIQUE KEY steamid (steamid)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`,
+		`CREATE TABLE IF NOT EXISTS wp_player_music (
+			steamid varchar(64) NOT NULL,
+			weapon_team int(1) NOT NULL,
+			music_id int(11) NOT NULL,
+			UNIQUE KEY steamid (steamid, weapon_team)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`,
+		`CREATE TABLE IF NOT EXISTS wp_player_pins (
+			steamid varchar(64) NOT NULL,
+			weapon_team int(1) NOT NULL,
+			id int(11) NOT NULL,
+			UNIQUE KEY steamid (steamid, weapon_team)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`,
+		`CREATE TABLE IF NOT EXISTS wp_web_tokens (
+			token varchar(64) NOT NULL,
+			code varchar(16) NOT NULL,
+			steamid varchar(20) NOT NULL,
+			expires_at datetime NOT NULL,
+			used tinyint(1) NOT NULL DEFAULT 0,
+			PRIMARY KEY (token),
+			KEY idx_code (code),
+			KEY idx_exp (expires_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci`,
+	}
+	for _, q := range stmts {
+		if _, err := s.SQL.Exec(q); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func teamsFor(team int) []int {
@@ -101,7 +198,6 @@ func (s *Store) GetLoadout(steamID string) (*Loadout, error) {
 		SkinsCT: map[int]SkinRecord{},
 	}
 
-	// Skins
 	rows, err := s.SQL.Query(`
 		SELECT weapon_team, weapon_defindex, weapon_paint_id, weapon_wear, weapon_seed,
 		       COALESCE(weapon_nametag, ''), weapon_stattrak, weapon_stattrak_count
@@ -123,7 +219,6 @@ func (s *Store) GetLoadout(steamID string) (*Loadout, error) {
 		}
 	}
 
-	// Knives
 	if kr, err := s.SQL.Query(`SELECT weapon_team, knife FROM wp_player_knife WHERE steamid = ?`, steamID); err == nil {
 		defer kr.Close()
 		for kr.Next() {
@@ -139,7 +234,6 @@ func (s *Store) GetLoadout(steamID string) (*Loadout, error) {
 		}
 	}
 
-	// Gloves
 	if gr, err := s.SQL.Query(`SELECT weapon_team, weapon_defindex FROM wp_player_gloves WHERE steamid = ?`, steamID); err == nil {
 		defer gr.Close()
 		for gr.Next() {
@@ -154,14 +248,12 @@ func (s *Store) GetLoadout(steamID string) (*Loadout, error) {
 		}
 	}
 
-	// Agents
 	var act, at sql.NullString
 	if err := s.SQL.QueryRow(`SELECT agent_ct, agent_t FROM wp_player_agents WHERE steamid = ?`, steamID).Scan(&act, &at); err == nil {
 		lo.AgentCT = act.String
 		lo.AgentT = at.String
 	}
 
-	// Music
 	if mr, err := s.SQL.Query(`SELECT weapon_team, music_id FROM wp_player_music WHERE steamid = ?`, steamID); err == nil {
 		defer mr.Close()
 		for mr.Next() {
@@ -176,7 +268,6 @@ func (s *Store) GetLoadout(steamID string) (*Loadout, error) {
 		}
 	}
 
-	// Pins
 	if pr, err := s.SQL.Query(`SELECT weapon_team, id FROM wp_player_pins WHERE steamid = ?`, steamID); err == nil {
 		defer pr.Close()
 		for pr.Next() {

@@ -49,15 +49,19 @@ func readPacket(r io.Reader) (int32, int32, string, error) {
 }
 
 func Exec(addr, password, command string) (string, error) {
+	return ExecWithTimeout(addr, password, command, 3*time.Second, 2000*time.Millisecond)
+}
+
+func ExecWithTimeout(addr, password, command string, dialTimeout, firstReadWait time.Duration) (string, error) {
 	if strings.TrimSpace(password) == "" {
 		return "", errors.New("RCON 密码未配置")
 	}
-	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	conn, err := net.DialTimeout("tcp", addr, dialTimeout)
 	if err != nil {
 		return "", fmt.Errorf("无法连接 CS2 RCON (%s): %w", addr, err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(dialTimeout + firstReadWait + 2*time.Second))
 
 	if err := writePacket(conn, 1, typeAuth, password); err != nil {
 		return "", err
@@ -86,7 +90,7 @@ func Exec(addr, password, command string) (string, error) {
 	}
 
 	var sb strings.Builder
-	_ = conn.SetReadDeadline(time.Now().Add(2000 * time.Millisecond))
+	_ = conn.SetReadDeadline(time.Now().Add(firstReadWait))
 	for {
 		id, _, body, err := readPacket(conn)
 		if err != nil {

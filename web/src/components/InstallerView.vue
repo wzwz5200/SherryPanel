@@ -3,18 +3,18 @@
     <div class="page-header">
       <div>
         <h1 class="page-title">自动部署与更新</h1>
-        <p class="page-subtitle">新服务器运行二进制后可直接在此一键下载 CS2 服务端（AppID 730）及全套换肤插件栈</p>
+        <p class="page-subtitle">自动下载 SteamCMD、CS2 服务端（AppID 730）、全自动托管 MariaDB 数据库与全套皮肤插件栈</p>
       </div>
       <button class="btn" @click="poll">刷新状态</button>
     </div>
 
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-bottom:18px;">
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-bottom:18px;">
       <div class="card" style="cursor:default;">
         <div class="card-subtitle">CS2 服务端 (AppID 730)</div>
         <div style="font-size:18px;font-weight:700;margin-top:6px;">
           {{ metrics.cs2_installed ? '已安装就绪' : '尚未安装' }}
         </div>
-        <div class="card-subtitle tabular" style="margin-top:6px;">{{ paths.cs2_dir }}</div>
+        <div class="card-subtitle tabular" style="margin-top:6px;word-break:break-all;">{{ paths.cs2_dir }}</div>
       </div>
 
       <div class="card" style="cursor:default;">
@@ -22,7 +22,7 @@
         <div style="font-size:18px;font-weight:700;margin-top:6px;">
           {{ metrics.plugins_ready ? 'Metamod + CSS + WP 已就绪' : '尚未安装' }}
         </div>
-        <div class="card-subtitle" style="margin-top:6px;">含 AnyBaseLib / PlayerSettings / MenuManager</div>
+        <div class="card-subtitle" style="margin-top:6px;">含内置 SkinBind 自动刷新通知</div>
       </div>
 
       <div class="card" style="cursor:default;">
@@ -37,8 +37,28 @@
     <div class="settings-group" style="margin-bottom:18px;">
       <div class="settings-row-inline">
         <div>
-          <div style="font-size:14px;font-weight:600;">1. 自动下载 / 校验更新 CS2 服务端</div>
-          <div style="font-size:12px;color:var(--label-secondary);">自动安装 32 位依赖、SteamCMD、下载/更新 CS2（~71 GB）并修复 steamclient.so</div>
+          <div style="font-size:14px;font-weight:600;">1. 初始化 / 修复皮肤数据库 (MariaDB)</div>
+          <div style="font-size:12px;color:var(--label-secondary);">Windows 自动下载便携版 MariaDB 并初始化 7 张数据表；Linux 自动安装 mariadb-server</div>
+        </div>
+        <button class="btn" :disabled="inst.running" @click="runTask('database')">
+          {{ inst.running && inst.task === 'database' ? '执行中...' : '初始化数据库' }}
+        </button>
+      </div>
+
+      <div class="settings-row-inline">
+        <div>
+          <div style="font-size:14px;font-weight:600;">2. 仅下载 / 检查 SteamCMD</div>
+          <div style="font-size:12px;color:var(--label-secondary);">仅拉取官方 SteamCMD 下载器，不触发 71 GB 服务端下载</div>
+        </div>
+        <button class="btn" :disabled="inst.running" @click="runTask('steamcmd')">
+          {{ inst.running && inst.task === 'steamcmd' ? '执行中...' : '下载 SteamCMD' }}
+        </button>
+      </div>
+
+      <div class="settings-row-inline">
+        <div>
+          <div style="font-size:14px;font-weight:600;">3. 自动下载 / 校验更新 CS2 服务端</div>
+          <div style="font-size:12px;color:var(--label-secondary);">自动准备 SteamCMD 与运行库、下载/更新 CS2（~71 GB）并配置环境</div>
         </div>
         <button class="btn btn-accent" :disabled="inst.running" @click="runTask('cs2')">
           {{ inst.running && inst.task === 'cs2' ? '执行中...' : '下载 / 更新 CS2' }}
@@ -47,8 +67,8 @@
 
       <div class="settings-row-inline">
         <div>
-          <div style="font-size:14px;font-weight:600;">2. 自动安装 / 更新全皮肤插件栈与中文图库</div>
-          <div style="font-size:12px;color:var(--label-secondary);">自动拉取最新版 Metamod、CounterStrikeSharp、WeaponPaints、依赖插件及本地皮肤图片</div>
+          <div style="font-size:14px;font-weight:600;">4. 自动安装 / 更新全皮肤插件栈与自动配置</div>
+          <div style="font-size:12px;color:var(--label-secondary);">自动拉取 Metamod、CounterStrikeSharp、WeaponPaints、依赖插件及内置 SkinBind，并自动生成配置文件</div>
         </div>
         <button class="btn btn-tinted" :disabled="inst.running" @click="runTask('plugins')">
           {{ inst.running && inst.task === 'plugins' ? '执行中...' : '安装 / 更新插件栈' }}
@@ -57,8 +77,8 @@
 
       <div class="settings-row-inline">
         <div>
-          <div style="font-size:14px;font-weight:600;">3. 一键全自动完整部署（全新机器推荐）</div>
-          <div style="font-size:12px;color:var(--label-secondary);">按顺序自动完成 CS2 服务端下载 + 全皮肤插件与中文图库部署</div>
+          <div style="font-size:14px;font-weight:600;">5. 一键全自动完整部署（全新机器推荐）</div>
+          <div style="font-size:12px;color:var(--label-secondary);">按顺序自动完成：MariaDB 建库 → SteamCMD → CS2 服务端 → 全皮肤插件与自动刷新</div>
         </div>
         <button class="btn btn-accent" :disabled="inst.running" @click="runTask('all')">
           {{ inst.running && inst.task === 'all' ? '执行中...' : '一键全自动部署' }}
@@ -69,7 +89,10 @@
     <div class="settings-group">
       <div class="settings-row">
         <div class="row-label">
-          <span>实时部署日志 · {{ inst.stage || '空闲' }}</span>
+          <span>
+            实时部署日志 · {{ inst.stage || '空闲' }}
+            <span v-if="inst.step_total" class="tabular">（步骤 {{ inst.step_index }}/{{ inst.step_total }}）</span>
+          </span>
           <span v-if="inst.running" class="row-value">任务运行中（每 2 秒自动刷新）</span>
           <span v-else-if="inst.last_error" style="color:var(--red);font-size:12px;">错误: {{ inst.last_error }}</span>
         </div>
@@ -86,7 +109,7 @@ const emit = defineEmits(['toast'])
 
 const metrics = ref({})
 const paths = ref({})
-const inst = ref({ running: false, task: '', stage: '空闲', last_error: '', logs: [] })
+const inst = ref({ running: false, task: '', stage: '空闲', step_index: 0, step_total: 0, last_error: '', logs: [] })
 let timer = null
 
 async function poll() {
@@ -102,7 +125,9 @@ async function poll() {
 }
 
 async function runTask(task) {
-  if (!confirm(`确定开始执行任务 [${task}] 吗？如果下载 CS2 完整服务端可能需要较长时间。`)) return
+  if (task === 'cs2' || task === 'all') {
+    if (!confirm(`确定开始执行任务 [${task}] 吗？如果下载 CS2 完整服务端可能需要较长时间。`)) return
+  }
   try {
     const res = await fetch('/api/installer/run', {
       method: 'POST',

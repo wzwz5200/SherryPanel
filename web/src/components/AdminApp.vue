@@ -8,7 +8,7 @@
       </div>
       <h1 style="font-size:22px;font-weight:700;letter-spacing:-0.3px;">CS2 独立管理控制台</h1>
       <p style="font-size:13px;color:var(--label-secondary);margin-top:6px;">
-        此端口与公开玩家换肤端物理隔离，请输入管理员密码解锁服务器管理、RCON 指令与部署功能。
+        此端口与公开玩家换肤端物理隔离，请输入管理员密码解锁服务器一键安装、RCON 控制台与配对管理功能。（首次启动的管理员密码已打印在运行黑框中）
       </p>
       <div style="margin-top:20px;display:flex;flex-direction:column;gap:10px;">
         <input
@@ -42,6 +42,11 @@
       <div>
         <div class="nav-section-label">服务器运维</div>
         <nav class="nav-list">
+          <button class="nav-item" :class="{ active: tab === 'wizard' }" @click="tab = 'wizard'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></svg>
+            <span>新手引导</span>
+            <span v-if="!setupReady" class="nav-count" style="background:rgba(255,149,0,0.18);color:var(--orange);">待配</span>
+          </button>
           <button class="nav-item" :class="{ active: tab === 'console' }" @click="tab = 'console'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m8 10 3 2-3 2" /><path d="M13 14h3" /></svg>
             <span>控制台与指令</span>
@@ -76,16 +81,22 @@
           独立管理通道 · 已通过管理员安全认证
         </div>
         <div class="toolbar-right">
-          <button v-if="meta.connect_cmd" class="btn btn-tinted" @click="copy(meta.connect_cmd, '已复制带密码进服命令')">
+          <button v-if="meta.connect_cmd" class="btn btn-tinted" @click="copy(meta.connect_cmd, '已复制进服命令')">
             复制进服命令
           </button>
-          <a class="btn" :href="`http://${meta.public_ip}:${meta.player_port}`" target="_blank" style="text-decoration:none;">
+          <a class="btn" :href="`http://${playerHost}:${meta.player_port}`" target="_blank" style="text-decoration:none;">
             打开玩家皮肤端 ↗
           </a>
         </div>
       </header>
       <main class="content">
-        <ServerConsole v-if="tab === 'console'" @toast="(m,e) => $emit('toast', m, e)" @refresh-meta="$emit('refresh-meta')" />
+        <OnboardingWizard
+          v-if="tab === 'wizard'"
+          @toast="(m,e) => $emit('toast', m, e)"
+          @refresh-meta="$emit('refresh-meta')"
+          @setup-changed="s => setupReady = !!s.ready"
+        />
+        <ServerConsole v-else-if="tab === 'console'" @toast="(m,e) => $emit('toast', m, e)" @refresh-meta="$emit('refresh-meta')" />
         <ServerSettings v-else-if="tab === 'settings'" @toast="(m,e) => $emit('toast', m, e)" @refresh-meta="$emit('refresh-meta')" />
         <PlayerPairing v-else-if="tab === 'pairing'" @toast="(m,e) => $emit('toast', m, e)" />
         <InstallerView v-else-if="tab === 'installer'" @toast="(m,e) => $emit('toast', m, e)" />
@@ -95,7 +106,8 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import OnboardingWizard from './OnboardingWizard.vue'
 import ServerConsole from './ServerConsole.vue'
 import ServerSettings from './ServerSettings.vue'
 import PlayerPairing from './PlayerPairing.vue'
@@ -110,7 +122,30 @@ const emit = defineEmits(['toast', 'refresh-meta', 'set-theme'])
 const tab = ref('console')
 const password = ref('')
 const busy = ref(false)
+const setupReady = ref(true)
+const checkedInitialSetup = ref(false)
 const authed = computed(() => !!props.meta.admin_authenticated)
+const playerHost = computed(() => {
+  if (props.meta.public_ip && props.meta.public_ip !== '127.0.0.1') return props.meta.public_ip
+  return window.location.hostname || '127.0.0.1'
+})
+
+async function checkSetupState() {
+  try {
+    const res = await fetch('/api/setup/state')
+    if (!res.ok) return
+    const st = await res.json()
+    setupReady.value = !!st.ready
+    if (!checkedInitialSetup.value) {
+      checkedInitialSetup.value = true
+      if (!st.ready) tab.value = 'wizard'
+    }
+  } catch {}
+}
+
+watch(authed, (val) => {
+  if (val) checkSetupState()
+}, { immediate: true })
 
 async function login() {
   if (!password.value) return
@@ -135,6 +170,7 @@ async function login() {
 
 async function logout() {
   await fetch('/api/admin/logout', { method: 'POST' })
+  checkedInitialSetup.value = false
   emit('toast', '已锁定管理控制台')
   emit('refresh-meta')
 }

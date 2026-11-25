@@ -5,7 +5,7 @@
         <div>
           <div class="sheet-title">{{ weapon.display_name }}</div>
           <div class="sheet-sub">
-            共 {{ weapon.skins.length }} 款涂装 · 应用范围：{{ teamModeLabel }}
+            共 {{ weapon.skins.length }} 款涂装 · 应用范围：{{ teamModeLabel }} · 保存即自动刷新
           </div>
         </div>
         <div style="display:flex;gap:8px;">

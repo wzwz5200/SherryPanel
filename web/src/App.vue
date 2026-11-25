@@ -44,7 +44,22 @@
           </div>
         </div>
 
-        <div style="margin-top:18px;display:flex;flex-direction:column;gap:10px;">
+                <div v-if="meta.db_connected === false" class="settings-group" style="text-align:left;margin-top:14px;border-color:rgba(255,149,0,0.45);background:rgba(255,149,0,0.08);">
+          <div class="settings-row">
+            <div style="font-size:13px;font-weight:700;color:var(--orange);">首次使用提示 · 服务器尚未初始化</div>
+            <div style="font-size:12px;color:var(--label-secondary);line-height:1.55;margin-top:4px;">
+              检测到本地皮肤数据库与 CS2 服务端还未部署。你是第一次使用吗？无需任何命令行，请打开管理端使用「新手引导」一键全自动下载安装（支持自动配置 MariaDB、SteamCMD、CS2 与皮肤插件）。
+            </div>
+            <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <a class="btn btn-sm btn-accent" :href="`http://${windowHost}:${meta.admin_port || '9090'}`" target="_blank" style="text-decoration:none;">
+                打开管理端「新手引导」 ↗
+              </a>
+              <span style="font-size:11px;color:var(--label-tertiary);">管理员密码见启动黑框或 panel-config.json</span>
+            </div>
+          </div>
+        </div>
+
+<div style="margin-top:18px;display:flex;flex-direction:column;gap:10px;">
           <input
             v-model="pairCode"
             class="code-input"
@@ -157,8 +172,8 @@
               <input v-model="searchQuery" :placeholder="searchPlaceholder" />
               <button v-if="searchQuery" class="search-clear" @click="searchQuery = ''">×</button>
             </div>
-            <button class="btn btn-tinted" @click="copyText('!wp', '已复制 !wp，进服聊天栏发送即可实时刷新')">
-              复制 !wp 刷新指令
+            <button class="btn btn-tinted" :disabled="syncing" @click="manualRefresh">
+              {{ syncing ? '同步中...' : '同步皮肤到游戏' }}
             </button>
           </div>
         </header>
@@ -168,7 +183,7 @@
             <div class="page-header">
               <div>
                 <h1 class="page-title">武器与匕首皮肤</h1>
-                <p class="page-subtitle">仅对你已认证的账号生效，保存后在游戏聊天栏输入 !wp 即刻应用</p>
+                <p class="page-subtitle">仅对你已认证的账号生效，点击保存即自动刷新游戏内皮肤（无需手动输入 !wp）</p>
               </div>
               <div class="segmented">
                 <button v-for="c in weaponCategories" :key="c.key" :class="{ active: weaponCat === c.key }" @click="weaponCat = c.key">
@@ -304,6 +319,8 @@ import AdminApp from './components/AdminApp.vue'
 
 const booting = ref(true)
 const saving = ref(false)
+const syncing = ref(false)
+const windowHost = computed(() => window.location.hostname || '127.0.0.1')
 const redeeming = ref(false)
 const pairCode = ref('')
 const tab = ref('weapons')
@@ -459,45 +476,52 @@ async function saveWeaponSkin(payload) {
   try {
     const res = await apiReq('/api/loadout/skin', { method: 'PUT', body: JSON.stringify({ team: teamMode.value, ...payload }) })
     loadout.value = res.loadout; modalWeapon.value = null
-    showToast('已保存涂装，游戏内输入 !wp 立即生效')
+    showToast(res.message || (res.auto_refreshed ? '已保存并自动刷新游戏内皮肤（无需输入 !wp）' : '已保存皮肤配置（进服后自动生效）'))
   } catch (e) { showToast(e.message, true) } finally { saving.value = false }
 }
 async function saveKnife(knife) {
   try {
     const res = await apiReq('/api/loadout/knife', { method: 'PUT', body: JSON.stringify({ team: teamMode.value, knife }) })
-    loadout.value = res.loadout; showToast('已切换匕首，游戏内输入 !wp 生效')
+    loadout.value = res.loadout; showToast(res.message || (res.auto_refreshed ? '已切换匕首并自动刷新生效' : '已切换匕首，进服后自动生效'))
   } catch (e) { showToast(e.message, true) }
 }
 async function saveGlove(g) {
   try {
     const res = await apiReq('/api/loadout/glove', { method: 'PUT', body: JSON.stringify({ team: teamMode.value, weapon_defindex: g.weapon_defindex, weapon_paint_id: g.paint, weapon_wear: gloveWear.value, weapon_seed: 0 }) })
-    loadout.value = res.loadout; showToast('已更新手套，游戏内输入 !wp 生效')
+    loadout.value = res.loadout; showToast(res.message || (res.auto_refreshed ? '已更新手套并自动刷新生效' : '已更新手套，进服后自动生效'))
   } catch (e) { showToast(e.message, true) }
 }
 async function saveAgent(a) {
   try {
     const res = await apiReq('/api/loadout/agent', { method: 'PUT', body: JSON.stringify({ team: a.team, model: a.model }) })
-    loadout.value = res.loadout; showToast('已更新探员模型')
+    loadout.value = res.loadout; showToast(res.message || (res.auto_refreshed ? '已更新探员并自动刷新生效' : '已更新探员模型'))
   } catch (e) { showToast(e.message, true) }
 }
 async function saveMusic(id) {
   try {
     const res = await apiReq('/api/loadout/music', { method: 'PUT', body: JSON.stringify({ team: teamMode.value, music_id: id }) })
-    loadout.value = res.loadout; showToast('已更新音乐盒，游戏内输入 !wp 生效')
+    loadout.value = res.loadout; showToast(res.message || (res.auto_refreshed ? '已更新音乐盒并自动刷新生效' : '已更新音乐盒，进服后自动生效'))
   } catch (e) { showToast(e.message, true) }
 }
 async function savePin(id) {
   try {
     const res = await apiReq('/api/loadout/pin', { method: 'PUT', body: JSON.stringify({ team: teamMode.value, id }) })
-    loadout.value = res.loadout; showToast('已更新收藏徽章，游戏内输入 !wp 生效')
+    loadout.value = res.loadout; showToast(res.message || (res.auto_refreshed ? '已更新徽章并自动刷新生效' : '已更新收藏徽章，进服后自动生效'))
   } catch (e) { showToast(e.message, true) }
 }
 async function resetAll() {
   if (!confirm('确定清空你的全部皮肤配置吗？')) return
   try {
     const res = await apiReq('/api/loadout', { method: 'DELETE' })
-    loadout.value = res.loadout; showToast('已重置全部皮肤配置')
+    loadout.value = res.loadout; showToast(res.message || '已重置全部皮肤配置')
   } catch (e) { showToast(e.message, true) }
+}
+async function manualRefresh() {
+  syncing.value = true
+  try {
+    const res = await apiReq('/api/loadout/refresh', { method: 'POST' })
+    showToast(res.message || (res.auto_refreshed ? '已同步皮肤到游戏内' : '当前未在服内或待机，进服后将自动生效'))
+  } catch (e) { showToast(e.message, true) } finally { syncing.value = false }
 }
 async function copyText(text, msg) {
   try { await navigator.clipboard.writeText(text); showToast(msg) } catch { showToast(text) }

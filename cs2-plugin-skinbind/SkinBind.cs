@@ -22,7 +22,7 @@ public class SkinBindConfig
 public class SkinBindPlugin : BasePlugin
 {
     public override string ModuleName => "SkinBind";
-    public override string ModuleVersion => "1.1.0";
+    public override string ModuleVersion => "1.2.0";
     public override string ModuleAuthor => "CS2 Panel";
 
     private string _connStr = "";
@@ -96,7 +96,7 @@ public class SkinBindPlugin : BasePlugin
 
             p.PrintToChat($" {ChatColors.Gold}========================================");
             p.PrintToChat($" {ChatColors.Green}★ {ChatColors.Gold}{_cfg.WelcomeTitle}");
-            p.PrintToChat($" {ChatColors.Default}常用指令：{ChatColors.LightBlue}!wp{ChatColors.Default} 刷新网页皮肤 | {ChatColors.LightBlue}!bind{ChatColors.Default} 重新获取配对码 | {ChatColors.LightBlue}!knife{ChatColors.Default} 切刀");
+            p.PrintToChat($" {ChatColors.LightBlue}网页换肤保存即自动刷新（无需手动输入 !wp）{ChatColors.Default} | {ChatColors.LightBlue}!bind{ChatColors.Default} 重新获取配对码 | {ChatColors.LightBlue}!knife{ChatColors.Default} 切刀");
             p.PrintToChat($" {ChatColors.Gold}========================================");
 
             if (_cfg.AutoSendBindCode)
@@ -115,6 +115,22 @@ public class SkinBindPlugin : BasePlugin
     {
         if (player == null || !player.IsValid || player.IsBot) return;
         IssueAndSendBindCode(player, isAuto: false);
+    }
+
+    [ConsoleCommand("css_skinbind_synced", "Notify an online player that their web skins were auto-refreshed")]
+    [CommandHelper(minArgs: 1, usage: "<steamid64>", whoCanExecute: CommandUsage.SERVER_ONLY)]
+    public void OnSyncedNotifyCommand(CCSPlayerController? caller, CommandInfo info)
+    {
+        var raw = info.GetArg(1).Trim();
+        if (!ulong.TryParse(raw, out var steamId)) return;
+        Server.NextFrame(() =>
+        {
+            var p = Utilities.GetPlayerFromSteamId(steamId);
+            if (p != null && p.IsValid && !p.IsBot)
+            {
+                p.PrintToChat($" {ChatColors.Green}[皮肤工坊]{ChatColors.Default} 网页保存的新皮肤已{ChatColors.Gold}自动同步生效{ChatColors.Default}！（无需输入 !wp）");
+            }
+        });
     }
 
     private void IssueAndSendBindCode(CCSPlayerController player, bool isAuto)
@@ -166,7 +182,7 @@ public class SkinBindPlugin : BasePlugin
                     {
                         var prefix = isAuto ? "进服自动配对码" : "你的 6 位配对码";
                         p.PrintToChat($" {ChatColors.Green}[皮肤工坊]{ChatColors.Default} {prefix}：{ChatColors.Gold}{code}{ChatColors.Default}（{ttlMin} 分钟内有效，仅你可见）");
-                        p.PrintToChat($" {ChatColors.Green}[皮肤工坊]{ChatColors.Default} 换肤网页：{ChatColors.LightBlue}{webUrl}{ChatColors.Default}（免 Steam 登录）");
+                        p.PrintToChat($" {ChatColors.Green}[皮肤工坊]{ChatColors.Default} 换肤网页：{ChatColors.LightBlue}{webUrl}{ChatColors.Default}（保存即自动刷新）");
                     }
                 });
             }

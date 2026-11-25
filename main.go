@@ -139,22 +139,34 @@ func main() {
 			fmt.Println("用法:")
 			fmt.Println("  ./cs2-panel                      启动玩家换肤端 (:8080) + 独立管理端 (:9090)")
 			fmt.Println("  ./cs2-panel setup                交互式配置向导并可选自动下载 CS2 服务端")
-			fmt.Println("  ./cs2-panel install [cs2|plugins|all] [--dry-run]  自动下载安装服务端/插件")
+			fmt.Println("  ./cs2-panel install [database|steamcmd|cs2|plugins|all] [--dry-run]  自动下载安装组件")
 			return
 		}
 	}
 
 	cfg := config.Load(cfgPath)
 
+	baseDir := filepath.Dir(cfg.CS2EnvFile)
+	if baseDir == "" || baseDir == "." {
+		baseDir, _ = os.Getwd()
+	}
+	if !cfg.DryRun && runtime.GOOS == "windows" {
+		if started, err := installer.EnsureManagedMariaDBRunning(baseDir); err != nil {
+			log.Printf("提示: 便携版 MariaDB 自动拉起异常: %v", err)
+		} else if started {
+			log.Printf("已自动启动本地便携版 MariaDB 数据库")
+		}
+	}
+
 	var store *db.Store
 	var sqlDB *sql.DB
 	if cfg.DBDSN != "" {
 		if st, err := db.Open(cfg.DBDSN); err != nil {
-			log.Printf("提示: MariaDB 暂未连接 (%v)，可先进入管理端配置数据库", err)
+			log.Printf("提示: MariaDB 暂未连接 (%v)，可进入管理端「新手引导」一键自动修复", err)
 		} else {
+			_ = st.EnsureSchema()
 			store = st
 			sqlDB = st.SQL
-			defer store.SQL.Close()
 		}
 	}
 
@@ -169,15 +181,28 @@ func main() {
 	authMgr := auth.New(cfg.SessionSecret, cfg.AdminPassword, sqlDB)
 	pubIP := detectPublicIP(cfg.PublicIP)
 	lanIP := detectLANIP()
+	instMgr := installer.New(cfg)
+	webHost := pubIP
+	if webHost == "" || webHost == "127.0.0.1" {
+		if lanIP != "" {
+			webHost = lanIP
+		} else {
+			webHost = "127.0.0.1"
+		}
+	}
+	instMgr.SetPlayerWebURL(fmt.Sprintf("http://%s:%s", webHost, cfg.PlayerPort))
+
 	srv := &api.Server{
 		Cfg:         cfg,
+		CfgPath:     cfgPath,
 		Store:       store,
 		Auth:        authMgr,
 		Catalog:     cat,
 		CatalogJSON: catJSON,
-		Installer:   installer.New(cfg),
+		Installer:   instMgr,
 		PublicIP:    pubIP,
 	}
+	instMgr.SetOnDBReady(srv.OnDatabaseReady)
 
 	sub, err := fs.Sub(distFS, "web/dist")
 	if err != nil {
@@ -226,6 +251,9 @@ func main() {
 	fmt.Printf("  [管理员密码 / Pass  ]  %s\n", cfg.AdminPassword)
 	fmt.Printf("  [配置文件   / Config]  %s\n", cfgPath)
 	fmt.Printf("  [皮肤数据   / Skins ]  %s\n", catSummary)
+	if store == nil {
+		fmt.Println("  [首次使用   / Setup ]  尚未初始化服务端/数据库，请打开管理端点击「一键全自动安装」")
+	}
 	if cfg.DryRun {
 		fmt.Println("  [运行模式   / Mode  ]  DRY-RUN 安全演练模式（不会实际下载 71 GB 服务端）")
 	}

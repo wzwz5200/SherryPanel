@@ -28,6 +28,7 @@ type AppConfig struct {
 	CS2EnvFile     string `json:"cs2_env_file"`
 	CS2ServiceName string `json:"cs2_service_name"`
 	PublicIP       string `json:"public_ip"`
+	WelcomeTitle   string `json:"welcome_title"`
 	DryRun         bool   `json:"dry_run"`
 }
 
@@ -54,6 +55,7 @@ func Default() AppConfig {
 		CS2EnvFile:     "/home/cs2/env.conf",
 		CS2ServiceName: "cs2.service",
 		PublicIP:       "",
+		WelcomeTitle:   "欢迎来到 Sherry 的专属服务器！",
 	}
 	if runtime.GOOS == "windows" {
 		base, _ := os.Getwd()
@@ -94,6 +96,10 @@ func Load(path string) AppConfig {
 	cfg.CS2EnvFile = envOr("CS2_ENV_FILE", cfg.CS2EnvFile)
 	cfg.CS2ServiceName = envOr("CS2_SERVICE_NAME", cfg.CS2ServiceName)
 	cfg.PublicIP = envOr("PUBLIC_IP", cfg.PublicIP)
+	cfg.WelcomeTitle = envOr("WELCOME_TITLE", cfg.WelcomeTitle)
+	if cfg.WelcomeTitle == "" {
+		cfg.WelcomeTitle = "欢迎来到 Sherry 的专属服务器！"
+	}
 	if strings.EqualFold(os.Getenv("DRY_RUN"), "true") || os.Getenv("DRY_RUN") == "1" {
 		cfg.DryRun = true
 	}
@@ -149,10 +155,11 @@ func PromptWizard(path string) (AppConfig, bool, bool) {
 	cfg.AdminPassword = ask("管理员登录密码", cfg.AdminPassword)
 	cfg.CS2Dir = ask("CS2 服务端安装目录", cfg.CS2Dir)
 	cfg.SteamCMDDir = ask("SteamCMD 目录", cfg.SteamCMDDir)
+	cfg.WelcomeTitle = ask("进服欢迎语", cfg.WelcomeTitle)
 	if runtime.GOOS != "windows" {
 		cfg.CS2User = ask("运行 CS2 的系统用户", cfg.CS2User)
 	}
-	cfg.DBDSN = ask("MariaDB DSN (留空可稍后配置)", cfg.DBDSN)
+	cfg.DBDSN = ask("MariaDB DSN (留空可稍后在管理端一键自动安装)", cfg.DBDSN)
 
 	if err := Save(path, cfg); err != nil {
 		fmt.Printf("保存配置失败: %v\n", err)

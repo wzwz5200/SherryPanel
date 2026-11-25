@@ -35,7 +35,7 @@ type Manager struct {
 	db            *sql.DB
 
 	mu       sync.Mutex
-	memCodes map[string]PairingRecord // code -> record (fallback when DB is absent, e.g., Windows dry-run)
+	memCodes map[string]PairingRecord // code -> record (fallback when DB is absent)
 	memToks  map[string]PairingRecord // token -> record
 	failLog  map[string][]time.Time   // ip -> failed attempts
 }
@@ -44,11 +44,18 @@ func New(secret, adminPassword string, sqlDB *sql.DB) *Manager {
 	m := &Manager{
 		secret:        []byte(secret),
 		adminPassword: adminPassword,
-		db:            sqlDB,
 		memCodes:      map[string]PairingRecord{},
 		memToks:       map[string]PairingRecord{},
 		failLog:       map[string][]time.Time{},
 	}
+	m.SetDB(sqlDB)
+	return m
+}
+
+func (m *Manager) SetDB(sqlDB *sql.DB) {
+	m.mu.Lock()
+	m.db = sqlDB
+	m.mu.Unlock()
 	if sqlDB != nil {
 		_, _ = sqlDB.Exec(`
 			CREATE TABLE IF NOT EXISTS wp_web_tokens (
@@ -62,7 +69,6 @@ func New(secret, adminPassword string, sqlDB *sql.DB) *Manager {
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 		`)
 	}
-	return m
 }
 
 func (m *Manager) CheckRateLimit(ip string) bool {
@@ -209,9 +215,12 @@ func (m *Manager) CreatePairing(steamID string, ttl time.Duration) (PairingRecor
 		SteamID:   steamID,
 		ExpiresAt: time.Now().UTC().Add(ttl),
 	}
-	if m.db != nil {
-		_, _ = m.db.Exec(`DELETE FROM wp_web_tokens WHERE expires_at < UTC_TIMESTAMP() OR used = 1`)
-		_, err := m.db.Exec(`INSERT INTO wp_web_tokens (token, code, steamid, expires_at, used) VALUES (?, ?, ?, ?, 0)`,
+	m.mu.Lock()
+	dbConn := m.db
+	m.mu.Unlock()
+	if dbConn != nil {
+		_, _ = dbConn.Exec(`DELETE FROM wp_web_tokens WHERE expires_at < UTC_TIMESTAMP() OR used = 1`)
+		_, err := dbConn.Exec(`INSERT INTO wp_web_tokens (token, code, steamid, expires_at, used) VALUES (?, ?, ?, ?, 0)`,
 			rec.Token, rec.Code, rec.SteamID, rec.ExpiresAt.Format("2006-01-02 15:04:05"))
 		if err != nil {
 			return rec, err
@@ -231,18 +240,21 @@ func (m *Manager) RedeemCodeOrToken(code, token string) (string, error) {
 	if code == "" && token == "" {
 		return "", fmt.Errorf("请提供配对码或专属令牌")
 	}
-	if m.db != nil {
+	m.mu.Lock()
+	dbConn := m.db
+	m.mu.Unlock()
+	if dbConn != nil {
 		var dbTok, sid string
 		var err error
 		if token != "" {
-			err = m.db.QueryRow(`SELECT token, steamid FROM wp_web_tokens WHERE token = ? AND used = 0 AND expires_at > UTC_TIMESTAMP() LIMIT 1`, token).Scan(&dbTok, &sid)
+			err = dbConn.QueryRow(`SELECT token, steamid FROM wp_web_tokens WHERE token = ? AND used = 0 AND expires_at > UTC_TIMESTAMP() LIMIT 1`, token).Scan(&dbTok, &sid)
 		} else {
-			err = m.db.QueryRow(`SELECT token, steamid FROM wp_web_tokens WHERE code = ? AND used = 0 AND expires_at > UTC_TIMESTAMP() LIMIT 1`, code).Scan(&dbTok, &sid)
+			err = dbConn.QueryRow(`SELECT token, steamid FROM wp_web_tokens WHERE code = ? AND used = 0 AND expires_at > UTC_TIMESTAMP() LIMIT 1`, code).Scan(&dbTok, &sid)
 		}
 		if err != nil {
 			return "", fmt.Errorf("配对码或专属链接无效或已过期，请在游戏内重新输入 !bind 或联系房主重新生成")
 		}
-		_, _ = m.db.Exec(`UPDATE wp_web_tokens SET used = 1 WHERE token = ?`, dbTok)
+		_, _ = dbConn.Exec(`UPDATE wp_web_tokens SET used = 1 WHERE token = ?`, dbTok)
 		return sid, nil
 	}
 

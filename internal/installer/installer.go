@@ -3,6 +3,7 @@ package installer
 import (
 	"archive/zip"
 	"bufio"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +17,12 @@ import (
 	"time"
 
 	"cs2-skins-web/internal/config"
+	"cs2-skins-web/internal/db"
+	"cs2-skins-web/internal/serverctl"
 )
+
+//go:embed embedded/SkinBind.dll
+var embeddedSkinBindDLL []byte
 
 type Status struct {
 	Running   bool      `json:"running"`
@@ -24,6 +30,8 @@ type Status struct {
 	OS        string    `json:"os"`
 	Task      string    `json:"task"`
 	Stage     string    `json:"stage"`
+	StepIndex int       `json:"step_index"`
+	StepTotal int       `json:"step_total"`
 	LastError string    `json:"last_error"`
 	StartedAt time.Time `json:"started_at"`
 	EndedAt   time.Time `json:"ended_at"`
@@ -31,9 +39,11 @@ type Status struct {
 }
 
 type Manager struct {
-	mu  sync.Mutex
-	st  Status
-	cfg config.AppConfig
+	mu           sync.Mutex
+	st           Status
+	cfg          config.AppConfig
+	playerWebURL string
+	onDBReady    func(dsn string)
 }
 
 func New(cfg config.AppConfig) *Manager {
@@ -41,6 +51,38 @@ func New(cfg config.AppConfig) *Manager {
 		cfg: cfg,
 		st:  Status{DryRun: cfg.DryRun, OS: runtime.GOOS},
 	}
+}
+
+func (m *Manager) UpdateConfig(cfg config.AppConfig) {
+	m.mu.Lock()
+	m.cfg = cfg
+	m.mu.Unlock()
+}
+
+func (m *Manager) SetPlayerWebURL(u string) {
+	m.mu.Lock()
+	m.playerWebURL = strings.TrimRight(u, "/")
+	m.mu.Unlock()
+}
+
+func (m *Manager) SetOnDBReady(fn func(dsn string)) {
+	m.mu.Lock()
+	m.onDBReady = fn
+	m.mu.Unlock()
+}
+
+func (m *Manager) baseDir() string {
+	m.mu.Lock()
+	envFile := m.cfg.CS2EnvFile
+	m.mu.Unlock()
+	if envFile != "" {
+		dir := filepath.Dir(envFile)
+		if dir != "" && dir != "." {
+			return dir
+		}
+	}
+	wd, _ := os.Getwd()
+	return wd
 }
 
 func (m *Manager) GetStatus() Status {
@@ -66,6 +108,13 @@ func (m *Manager) setStage(stage string) {
 	m.st.Stage = stage
 	m.mu.Unlock()
 	m.appendLog("=== " + stage + " ===")
+}
+
+func (m *Manager) setStep(idx, total int) {
+	m.mu.Lock()
+	m.st.StepIndex = idx
+	m.st.StepTotal = total
+	m.mu.Unlock()
 }
 
 func (m *Manager) StartTask(task string, dryRunOverride *bool) error {
@@ -129,13 +178,32 @@ func (m *Manager) execTask(task string, dryRun bool) {
 	}
 
 	switch task {
+	case "steamcmd":
+		m.setStep(1, 1)
+		err = m.installSteamCMD(dryRun)
+	case "database":
+		m.setStep(1, 1)
+		err = m.installDatabase(dryRun)
 	case "cs2":
-		err = m.installCS2(dryRun)
+		m.setStep(1, 2)
+		if err = m.installSteamCMD(dryRun); err == nil {
+			m.setStep(2, 2)
+			err = m.installCS2(dryRun)
+		}
 	case "plugins":
+		m.setStep(1, 1)
 		err = m.installPlugins(dryRun)
 	case "all":
-		if err = m.installCS2(dryRun); err == nil {
-			err = m.installPlugins(dryRun)
+		m.setStep(1, 4)
+		if err = m.installDatabase(dryRun); err == nil {
+			m.setStep(2, 4)
+			if err = m.installSteamCMD(dryRun); err == nil {
+				m.setStep(3, 4)
+				if err = m.installCS2(dryRun); err == nil {
+					m.setStep(4, 4)
+					err = m.installPlugins(dryRun)
+				}
+			}
 		}
 	default:
 		err = fmt.Errorf("未知任务类型: %s", task)
@@ -145,7 +213,7 @@ func (m *Manager) execTask(task string, dryRun bool) {
 func (m *Manager) checkURL(u string) error {
 	c := &http.Client{Timeout: 8 * time.Second}
 	req, _ := http.NewRequest("HEAD", u, nil)
-	req.Header.Set("User-Agent", "cs2-panel/2.0")
+	req.Header.Set("User-Agent", "SherryPanel/1.3")
 	resp, err := c.Do(req)
 	if err != nil {
 		return err
@@ -156,9 +224,9 @@ func (m *Manager) checkURL(u string) error {
 }
 
 func downloadFile(u, dst string) error {
-	c := &http.Client{Timeout: 5 * time.Minute}
+	c := &http.Client{Timeout: 10 * time.Minute}
 	req, _ := http.NewRequest("GET", u, nil)
-	req.Header.Set("User-Agent", "cs2-panel/2.0")
+	req.Header.Set("User-Agent", "SherryPanel/1.3")
 	resp, err := c.Do(req)
 	if err != nil {
 		return err
@@ -188,6 +256,61 @@ func unzipFile(src, dest string) error {
 	for _, f := range r.File {
 		fpath := filepath.Join(dest, f.Name)
 		if !strings.HasPrefix(filepath.Clean(fpath), filepath.Clean(dest)+string(os.PathSeparator)) && filepath.Clean(fpath) != filepath.Clean(dest) {
+			continue
+		}
+		if f.FileInfo().IsDir() {
+			_ = os.MkdirAll(fpath, 0755)
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+			return err
+		}
+		out, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+		in, err := f.Open()
+		if err != nil {
+			out.Close()
+			return err
+		}
+		_, err = io.Copy(out, in)
+		in.Close()
+		out.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// extractPluginZip handles zips whose internal root is game/csgo/addons/..., addons/..., counterstrikesharp/..., or plugins/...
+func extractPluginZip(src, csgoDir string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	cssDir := filepath.Join(csgoDir, "addons", "counterstrikesharp")
+	for _, f := range r.File {
+		name := strings.TrimPrefix(strings.ReplaceAll(f.Name, `\`, `/`), "./")
+		var targetBase string
+		switch {
+		case strings.HasPrefix(name, "game/csgo/"):
+			name = strings.TrimPrefix(name, "game/csgo/")
+			targetBase = csgoDir
+		case strings.HasPrefix(name, "addons/"):
+			targetBase = csgoDir
+		case strings.HasPrefix(name, "counterstrikesharp/"):
+			targetBase = filepath.Join(csgoDir, "addons")
+		default:
+			targetBase = cssDir
+		}
+		if name == "" {
+			continue
+		}
+		fpath := filepath.Join(targetBase, filepath.FromSlash(name))
+		if !strings.HasPrefix(filepath.Clean(fpath), filepath.Clean(csgoDir)+string(os.PathSeparator)) {
 			continue
 		}
 		if f.FileInfo().IsDir() {
@@ -268,47 +391,175 @@ func patchGameInfoAndCore(csgoDir string) error {
 	return nil
 }
 
-func (m *Manager) installCS2(dryRun bool) error {
+// WriteSkinBindConfig writes SkinBind.json when the CounterStrikeSharp configs dir exists.
+func WriteSkinBindConfig(cs2Dir, welcomeTitle string) error {
+	if strings.TrimSpace(welcomeTitle) == "" {
+		welcomeTitle = "欢迎来到 Sherry 的专属服务器！"
+	}
+	cfgDir := filepath.Join(cs2Dir, "game", "csgo", "addons", "counterstrikesharp", "configs", "plugins", "SkinBind")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"WelcomeTitle":      welcomeTitle,
+		"JoinBroadcast":     true,
+		"AutoSendBindCode":  true,
+		"CodeExpireMinutes": 10,
+		"JoinDelaySeconds":  3.0,
+	}
+	b, _ := json.MarshalIndent(payload, "", "  ")
+	return os.WriteFile(filepath.Join(cfgDir, "SkinBind.json"), b, 0644)
+}
+
+// WriteWeaponPaintsConfig generates or updates WeaponPaints.json from cfg.DBDSN.
+func WriteWeaponPaintsConfig(cs2Dir string, cfg config.AppConfig, playerWebURL string) error {
+	cfgDir := filepath.Join(cs2Dir, "game", "csgo", "addons", "counterstrikesharp", "configs", "plugins", "WeaponPaints")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		return err
+	}
+	wpPath := filepath.Join(cfgDir, "WeaponPaints.json")
+	doc := map[string]any{
+		"DatabaseHost":              "127.0.0.1",
+		"DatabasePort":              3306,
+		"DatabaseUser":              "wpuser",
+		"DatabasePassword":          "",
+		"DatabaseName":              "cs2_weaponpaints",
+		"DatabaseSslMode":           "none",
+		"CmdRefreshCooldownSeconds": 1,
+		"GlobalShare":               false,
+		"Additional": map[string]any{
+			"KnifeEnabled":         true,
+			"GloveEnabled":         true,
+			"MusicEnabled":         true,
+			"AgentEnabled":         true,
+			"SkinEnabled":          true,
+			"PinsEnabled":          true,
+			"CommandWpEnabled":     true,
+			"CommandKillEnabled":   false,
+			"CommandKnife":         []string{"knife"},
+			"CommandMusic":         []string{"music"},
+			"CommandPin":           []string{"pin", "pins"},
+			"CommandGlove":         []string{"gloves", "glove"},
+			"CommandAgent":         []string{"agents", "agent"},
+			"CommandStattrak":      []string{"stattrak", "st"},
+			"CommandSkin":          []string{"ws"},
+			"CommandSkinSelection": []string{"skins"},
+			"CommandRefresh":       []string{"wp"},
+			"GiveRandomKnife":      false,
+			"GiveRandomSkin":       false,
+			"ShowSkinImage":        true,
+		},
+		"Website":       playerWebURL,
+		"ConfigVersion": 10,
+	}
+	if raw, err := os.ReadFile(wpPath); err == nil {
+		var existing map[string]any
+		if json.Unmarshal(raw, &existing) == nil {
+			for k, v := range existing {
+				doc[k] = v
+			}
+		}
+	}
+	if user, pass, host, portStr, dbName, ok := db.ParseDSN(cfg.DBDSN); ok && user != "" {
+		port := 3306
+		_, _ = fmt.Sscanf(portStr, "%d", &port)
+		if port <= 0 {
+			port = 3306
+		}
+		doc["DatabaseHost"] = host
+		doc["DatabasePort"] = port
+		doc["DatabaseUser"] = user
+		doc["DatabasePassword"] = pass
+		doc["DatabaseName"] = dbName
+	}
+	doc["CmdRefreshCooldownSeconds"] = 1
+	if playerWebURL != "" {
+		doc["Website"] = playerWebURL
+	}
+	doc["ConfigVersion"] = 10
+	out, _ := json.MarshalIndent(doc, "", "  ")
+	return os.WriteFile(wpPath, out, 0600)
+}
+
+func EnsureRCONPassword(envFile, cs2Dir string) error {
+	env := serverctl.ReadEnv(envFile)
+	if strings.TrimSpace(env.RCONPassword) != "" {
+		return nil
+	}
+	env.RCONPassword = "rcon-" + randomHexStr(8)
+	return serverctl.WriteEnv(envFile, cs2Dir, env)
+}
+
+func (m *Manager) deployEmbeddedSkinBindAndConfigs(csgoDir string) {
+	if len(embeddedSkinBindDLL) > 0 {
+		sbDir := filepath.Join(csgoDir, "addons", "counterstrikesharp", "plugins", "SkinBind")
+		if err := os.MkdirAll(sbDir, 0755); err == nil {
+			if err := os.WriteFile(filepath.Join(sbDir, "SkinBind.dll"), embeddedSkinBindDLL, 0644); err != nil {
+				m.appendLog("警告: 写入 SkinBind.dll 失败: " + err.Error())
+			} else {
+				m.appendLog("已自动部署内置 SkinBind v1.2.0（进服欢迎语 + 自动配对码 + 网页自动刷新通知）")
+			}
+			wpMySQL := filepath.Join(csgoDir, "addons", "counterstrikesharp", "plugins", "WeaponPaints", "MySqlConnector.dll")
+			if raw, err := os.ReadFile(wpMySQL); err == nil {
+				_ = os.WriteFile(filepath.Join(sbDir, "MySqlConnector.dll"), raw, 0644)
+			}
+		}
+	}
+
+	m.mu.Lock()
+	cfg := m.cfg
+	webURL := m.playerWebURL
+	m.mu.Unlock()
+	if webURL == "" {
+		webURL = "http://127.0.0.1:" + cfg.PlayerPort
+	}
+	if err := WriteWeaponPaintsConfig(cfg.CS2Dir, cfg, webURL); err != nil {
+		m.appendLog("警告: 自动写入 WeaponPaints.json 失败: " + err.Error())
+	} else {
+		m.appendLog("已自动生成 WeaponPaints.json 数据库连接配置")
+	}
+	if err := WriteSkinBindConfig(cfg.CS2Dir, cfg.WelcomeTitle); err != nil {
+		m.appendLog("警告: 自动写入 SkinBind.json 失败: " + err.Error())
+	}
+	if err := EnsureRCONPassword(cfg.CS2EnvFile, cfg.CS2Dir); err == nil {
+		m.appendLog("已校验并就绪 CS2 RCON 自动刷新通道")
+	}
+}
+
+func (m *Manager) installSteamCMD(dryRun bool) error {
+	m.setStage(fmt.Sprintf("下载 SteamCMD 下载器 (%s)", runtime.GOOS))
 	if runtime.GOOS == "windows" {
-		m.setStage("Windows SteamCMD 与 CS2 服务端部署")
 		steamURL := "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
+		steamExe := filepath.Join(m.cfg.SteamCMDDir, "steamcmd.exe")
 		if dryRun {
 			_ = m.checkURL(steamURL)
-			m.appendLog(fmt.Sprintf("[DRY-RUN] 将创建目录: %s 与 %s", m.cfg.SteamCMDDir, m.cfg.CS2Dir))
-			m.appendLog(fmt.Sprintf("[DRY-RUN] 将执行: %s +force_install_dir %s +login anonymous +app_update 730 validate +quit",
-				filepath.Join(m.cfg.SteamCMDDir, "steamcmd.exe"), m.cfg.CS2Dir))
-			m.appendLog("[DRY-RUN] Windows CS2 服务端部署流程校验通过（未下载 71 GB 文件）")
+			m.appendLog(fmt.Sprintf("[DRY-RUN] 将下载并解压 SteamCMD 到: %s", m.cfg.SteamCMDDir))
+			return nil
+		}
+		if _, err := os.Stat(steamExe); err == nil {
+			m.appendLog("SteamCMD 已存在: " + steamExe)
 			return nil
 		}
 		if err := os.MkdirAll(m.cfg.SteamCMDDir, 0755); err != nil {
 			return err
 		}
-		if err := os.MkdirAll(m.cfg.CS2Dir, 0755); err != nil {
+		zipPath := filepath.Join(m.cfg.SteamCMDDir, "steamcmd.zip")
+		m.appendLog("正在下载 Windows SteamCMD...")
+		if err := downloadFile(steamURL, zipPath); err != nil {
 			return err
 		}
-		steamExe := filepath.Join(m.cfg.SteamCMDDir, "steamcmd.exe")
-		if _, err := os.Stat(steamExe); err != nil {
-			zipPath := filepath.Join(m.cfg.SteamCMDDir, "steamcmd.zip")
-			m.appendLog("下载 Windows SteamCMD...")
-			if err := downloadFile(steamURL, zipPath); err != nil {
-				return err
-			}
-			if err := unzipFile(zipPath, m.cfg.SteamCMDDir); err != nil {
-				return err
-			}
-			_ = os.Remove(zipPath)
+		if err := unzipFile(zipPath, m.cfg.SteamCMDDir); err != nil {
+			return err
 		}
-		m.setStage("通过 Windows SteamCMD 下载/更新 CS2 (AppID 730)")
-		cmd := exec.Command(steamExe, "+force_install_dir", m.cfg.CS2Dir, "+login", "anonymous", "+app_update", "730", "validate", "+quit")
-		return m.runCmdStream(cmd)
+		_ = os.Remove(zipPath)
+		m.appendLog("SteamCMD 安装完成: " + steamExe)
+		return nil
 	}
 
-	// Linux path
-	m.setStage("Linux SteamCMD 与 CS2 服务端部署")
 	steamURL := "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
 	if dryRun {
 		_ = m.checkURL(steamURL)
-		m.appendLog(fmt.Sprintf("[DRY-RUN] 将在 %s 下载/校验 CS2 (AppID 730) 并软链 steamclient.so", m.cfg.CS2Dir))
+		m.appendLog(fmt.Sprintf("[DRY-RUN] 将在 %s 安装 32 位运行库与 steamcmd.sh", m.cfg.SteamCMDDir))
 		return nil
 	}
 	script := fmt.Sprintf(`set -e
@@ -320,20 +571,50 @@ mkdir -p "%s" "%s" "/home/%s/.steam/sdk64"
 chown -R %s:%s "%s" "%s" "/home/%s/.steam"
 if [ ! -f "%s/steamcmd.sh" ]; then
   su - %s -c 'cd "%s" && curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz'
-fi
+fi`,
+		m.cfg.CS2User, m.cfg.CS2User, m.cfg.SteamCMDDir, m.cfg.CS2Dir, m.cfg.CS2User,
+		m.cfg.CS2User, m.cfg.CS2User, m.cfg.SteamCMDDir, m.cfg.CS2Dir, m.cfg.CS2User,
+		m.cfg.SteamCMDDir, m.cfg.CS2User, m.cfg.SteamCMDDir)
+	return m.runCmdStream(exec.Command("bash", "-c", script))
+}
+
+func (m *Manager) installCS2(dryRun bool) error {
+	m.setStage(fmt.Sprintf("通过 SteamCMD 下载/更新 CS2 服务端 (%s)", runtime.GOOS))
+	if runtime.GOOS == "windows" {
+		steamExe := filepath.Join(m.cfg.SteamCMDDir, "steamcmd.exe")
+		if dryRun {
+			m.appendLog(fmt.Sprintf("[DRY-RUN] 将创建 CS2 目录: %s", m.cfg.CS2Dir))
+			m.appendLog(fmt.Sprintf("[DRY-RUN] 将执行: %s +force_install_dir %s +login anonymous +app_update 730 validate +quit", steamExe, m.cfg.CS2Dir))
+			m.appendLog("[DRY-RUN] Windows CS2 服务端部署流程校验通过（未下载 71 GB 文件）")
+			return nil
+		}
+		if _, err := os.Stat(steamExe); err != nil {
+			if err := m.installSteamCMD(false); err != nil {
+				return err
+			}
+		}
+		if err := os.MkdirAll(m.cfg.CS2Dir, 0755); err != nil {
+			return err
+		}
+		cmd := exec.Command(steamExe, "+force_install_dir", m.cfg.CS2Dir, "+login", "anonymous", "+app_update", "730", "validate", "+quit")
+		return m.runCmdStream(cmd)
+	}
+
+	if dryRun {
+		m.appendLog(fmt.Sprintf("[DRY-RUN] 将在 %s 下载/校验 CS2 (AppID 730) 并软链 steamclient.so", m.cfg.CS2Dir))
+		return nil
+	}
+	script := fmt.Sprintf(`set -e
 su - %s -c '"%s/steamcmd.sh" +force_install_dir "%s" +login anonymous +app_update 730 validate +quit'
 ln -sf "%s/linux64/steamclient.so" "/home/%s/.steam/sdk64/steamclient.so"
 chown -h %s:%s "/home/%s/.steam/sdk64/steamclient.so"`,
-		m.cfg.CS2User, m.cfg.CS2User, m.cfg.SteamCMDDir, m.cfg.CS2Dir, m.cfg.CS2User,
-		m.cfg.CS2User, m.cfg.CS2User, m.cfg.SteamCMDDir, m.cfg.CS2Dir, m.cfg.CS2User,
-		m.cfg.SteamCMDDir, m.cfg.CS2User, m.cfg.SteamCMDDir,
 		m.cfg.CS2User, m.cfg.SteamCMDDir, m.cfg.CS2Dir,
 		m.cfg.SteamCMDDir, m.cfg.CS2User, m.cfg.CS2User, m.cfg.CS2User, m.cfg.CS2User)
 	return m.runCmdStream(exec.Command("bash", "-c", script))
 }
 
 func (m *Manager) installPlugins(dryRun bool) error {
-	m.setStage(fmt.Sprintf("安装全皮肤插件栈 (%s)", runtime.GOOS))
+	m.setStage(fmt.Sprintf("安装全皮肤插件栈与自动配对组件 (%s)", runtime.GOOS))
 	csgoDir := filepath.Join(m.cfg.CS2Dir, "game", "csgo")
 	if dryRun {
 		mmLatest := "https://mms.alliedmods.net/mmsdrop/2.0/mmsource-latest-linux"
@@ -343,7 +624,7 @@ func (m *Manager) installPlugins(dryRun bool) error {
 		_ = m.checkURL(mmLatest)
 		m.appendLog(fmt.Sprintf("[DRY-RUN] 目标插件目录: %s", filepath.Join(csgoDir, "addons")))
 		m.appendLog("[DRY-RUN] 将拉取 Metamod + CounterStrikeSharp + AnyBaseLib + PlayerSettings + MenuManager + WeaponPaints")
-		m.appendLog("[DRY-RUN] 将纯 Go 修补 gameinfo.gi 并设置 core.json FollowCS2ServerGuidelines=false")
+		m.appendLog(fmt.Sprintf("[DRY-RUN] 将写入内置 SkinBind v1.2.0 (%d bytes) 并自动生成 WeaponPaints.json / SkinBind.json", len(embeddedSkinBindDLL)))
 		return nil
 	}
 
@@ -351,7 +632,6 @@ func (m *Manager) installPlugins(dryRun bool) error {
 		if err := os.MkdirAll(filepath.Join(csgoDir, "addons"), 0755); err != nil {
 			return err
 		}
-		// Metamod Windows
 		c := &http.Client{Timeout: 30 * time.Second}
 		resp, err := c.Get("https://mms.alliedmods.net/mmsdrop/2.0/mmsource-latest-windows")
 		if err != nil {
@@ -368,21 +648,22 @@ func (m *Manager) installPlugins(dryRun bool) error {
 			return err
 		}
 		_ = os.Remove(mmZip)
-		// Fetch latest GitHub releases (CSS Windows + deps + WeaponPaints)
+
 		repos := []struct {
 			repo    string
 			pattern string
-			dest    string
 		}{
-			{"roflmuffin/CounterStrikeSharp", "counterstrikesharp-with-runtime-windows-", csgoDir},
-			{"NickFox007/AnyBaseLibCS2", ".zip", csgoDir},
-			{"NickFox007/PlayerSettingsCS2", ".zip", csgoDir},
-			{"NickFox007/MenuManagerCS2", ".zip", csgoDir},
-			{"Nereziel/cs2-WeaponPaints", "WeaponPaints.zip", csgoDir},
+			{"roflmuffin/CounterStrikeSharp", "counterstrikesharp-with-runtime-windows-"},
+			{"NickFox007/AnyBaseLibCS2", ".zip"},
+			{"NickFox007/PlayerSettingsCS2", ".zip"},
+			{"NickFox007/MenuManagerCS2", ".zip"},
+			{"Nereziel/cs2-WeaponPaints", "WeaponPaints.zip"},
 		}
 		for _, r := range repos {
 			m.appendLog("拉取最新 Release: " + r.repo)
-			apiResp, err := c.Get("https://api.github.com/repos/" + r.repo + "/releases/latest")
+			req, _ := http.NewRequest("GET", "https://api.github.com/repos/"+r.repo+"/releases/latest", nil)
+			req.Header.Set("User-Agent", "SherryPanel/1.3")
+			apiResp, err := c.Do(req)
 			if err != nil {
 				return err
 			}
@@ -408,17 +689,17 @@ func (m *Manager) installPlugins(dryRun bool) error {
 			if err := downloadFile(dl, tmpZ); err != nil {
 				return err
 			}
-			if err := unzipFile(tmpZ, r.dest); err != nil {
+			if err := extractPluginZip(tmpZ, csgoDir); err != nil {
 				return err
 			}
 			_ = os.Remove(tmpZ)
 		}
 		_ = patchGameInfoAndCore(csgoDir)
-		m.appendLog("Windows 插件栈安装完成！")
+		m.deployEmbeddedSkinBindAndConfigs(csgoDir)
+		m.appendLog("Windows 插件栈、内置 SkinBind 与自动配置全部就绪！")
 		return nil
 	}
 
-	// Linux path
 	script := fmt.Sprintf(`set -e
 CSGO_DIR="%s"
 CSS_DIR="${CSGO_DIR}/addons/counterstrikesharp"
@@ -438,13 +719,15 @@ for repo in NickFox007/AnyBaseLibCS2 NickFox007/PlayerSettingsCS2 NickFox007/Men
   rm -rf /tmp/dep_ext
 done
 rm -rf /tmp/wp_web_repo
-git clone --depth 1 https://github.com/Nereziel/cs2-WeaponPaints.git /tmp/wp_web_repo >/dev/null 2>&1
-cp -rf /tmp/wp_web_repo/website/data/* "${DATA_DIR}/"
-cp -rf /tmp/wp_web_repo/website/img/* "${IMG_DIR}/"
+git clone --depth 1 https://github.com/Nereziel/cs2-WeaponPaints.git /tmp/wp_web_repo >/dev/null 2>&1 || true
+if [ -d /tmp/wp_web_repo/website/data ]; then cp -rf /tmp/wp_web_repo/website/data/* "${DATA_DIR}/"; fi
+if [ -d /tmp/wp_web_repo/website/img ]; then cp -rf /tmp/wp_web_repo/website/img/* "${IMG_DIR}/"; fi
 rm -rf /tmp/wp_web_repo
 chown -R %s:%s "${CSGO_DIR}/addons" 2>/dev/null || true`, csgoDir, m.cfg.DataDir, m.cfg.ImgDir, m.cfg.CS2User, m.cfg.CS2User)
 	if err := m.runCmdStream(exec.Command("bash", "-c", script)); err != nil {
 		return err
 	}
-	return patchGameInfoAndCore(csgoDir)
+	_ = patchGameInfoAndCore(csgoDir)
+	m.deployEmbeddedSkinBindAndConfigs(csgoDir)
+	return nil
 }
