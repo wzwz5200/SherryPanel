@@ -1,0 +1,15 @@
+# Binaries & Build Outputs
+cs2-skins-web
+cs2-panel-*
+release/
+web/node_modules/
+web/dist/
+cs2-plugin-skinbind/bin/
+cs2-plugin-skinbind/obj/
+
+# Local Configs, Secrets & Logs
+*.env
+panel-config.json
+cs2.env
+*.log
+*.tmp

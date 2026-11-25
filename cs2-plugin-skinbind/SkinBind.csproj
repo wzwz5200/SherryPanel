@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="CounterStrikeSharp.API">
+      <HintPath>/home/cs2/cs2-ds/game/csgo/addons/counterstrikesharp/api/CounterStrikeSharp.API.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MySqlConnector">
+      <HintPath>/home/cs2/cs2-ds/game/csgo/addons/counterstrikesharp/plugins/WeaponPaints/MySqlConnector.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
