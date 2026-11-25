@@ -327,6 +327,8 @@ func (s *Server) RegisterAdmin(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/server/action", s.requireAdmin(s.handleServerAction))
 	mux.HandleFunc("POST /api/server/rcon", s.requireAdmin(s.handleRCON))
 	mux.HandleFunc("POST /api/server/preset", s.requireAdmin(s.handlePreset))
+	mux.HandleFunc("GET /api/server/cvars", s.requireAdmin(s.handleGetCVars))
+	mux.HandleFunc("POST /api/server/cvar", s.requireAdmin(s.handleSetCVars))
 	mux.HandleFunc("GET /api/installer/status", s.requireAdmin(s.handleInstallerStatus))
 	mux.HandleFunc("POST /api/installer/run", s.requireAdmin(s.handleInstallerRun))
 	mux.HandleFunc("GET /api/admin/players", s.requireAdmin(s.handleAdminPlayers))
