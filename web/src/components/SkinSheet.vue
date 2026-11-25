@@ -5,13 +5,22 @@
         <div>
           <div class="sheet-title">{{ weapon.display_name }}</div>
           <div class="sheet-sub">
-            共 {{ weapon.skins.length }} 款涂装 · 应用范围：{{ teamModeLabel }} · 保存即自动刷新
+            <template v-if="isKnife">
+              {{ isActiveKnife ? '当前已装备此匕首' : (equipKnife ? '保存后将自动切换装备此匕首并同步涂装' : '仅保存此匕首涂装预设（不切换当前刀型）') }}
+              · 共 {{ weapon.skins.length }} 款涂装 · {{ teamModeLabel }}
+            </template>
+            <template v-else>
+              共 {{ weapon.skins.length }} 款涂装 · 应用范围：{{ teamModeLabel }} · 保存即自动刷新
+            </template>
           </div>
         </div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button v-if="hasCustom" class="btn" :disabled="saving" @click="resetDefault">
+            恢复默认原版
+          </button>
           <button class="btn" @click="$emit('close')">取消</button>
           <button class="btn btn-accent" :disabled="saving" @click="submit">
-            {{ saving ? '保存中...' : '保存并应用' }}
+            {{ saving ? '保存中...' : (isKnife && equipKnife && !isActiveKnife ? '装备此刀并保存' : '保存并应用') }}
           </button>
         </div>
       </div>
@@ -21,7 +30,13 @@
           <div class="preview-stage">
             <img :src="selectedSkin?.image || weapon.default_image" :alt="weapon.display_name" />
             <div style="font-size:15px;font-weight:600;margin-top:10px;letter-spacing:-0.15px;">
-              {{ selectedSkin?.short_name || '默认原版' }}<div v-if='selectedSkin?.short_name_en && selectedSkin.short_name_en !== selectedSkin.short_name' style='font-size:12px;color:var(--label-secondary);font-weight:400;margin-top:2px;'>{{ selectedSkin.short_name_en }}</div>
+              {{ selectedSkin?.short_name || '默认原版' }}
+              <div
+                v-if="selectedSkin?.short_name_en && selectedSkin.short_name_en !== selectedSkin.short_name"
+                style="font-size:12px;color:var(--label-secondary);font-weight:400;margin-top:2px;"
+              >
+                {{ selectedSkin.short_name_en }}
+              </div>
             </div>
             <div class="tabular" style="font-size:12px;color:var(--label-secondary);margin-top:2px;">
               涂装编号 #{{ form.paintId }}
@@ -29,6 +44,17 @@
           </div>
 
           <div class="settings-group">
+            <div v-if="isKnife && !isActiveKnife" class="settings-row-inline">
+              <div>
+                <div style="font-size:13px;font-weight:500;">保存后自动装备此匕首</div>
+                <div style="font-size:11.5px;color:var(--label-secondary);">替换当前手持刀型并在游戏内同步生效</div>
+              </div>
+              <label class="ios-switch">
+                <input type="checkbox" v-model="equipKnife" />
+                <span class="ios-slider"></span>
+              </label>
+            </div>
+
             <div class="settings-row">
               <div class="row-label">
                 <span>磨损度 (Float)</span>
@@ -98,7 +124,12 @@
             >
               <img :src="s.image" :alt="s.short_name" loading="lazy" />
               <div class="skin-tile-name" :title="s.name">{{ s.short_name }}</div>
-              <div v-if="s.short_name_en && s.short_name_en !== s.short_name" style="font-size:10.5px;color:var(--label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ s.short_name_en }}</div>
+              <div
+                v-if="s.short_name_en && s.short_name_en !== s.short_name"
+                style="font-size:10.5px;color:var(--label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+              >
+                {{ s.short_name_en }}
+              </div>
             </div>
           </div>
         </div>
@@ -114,12 +145,15 @@ const props = defineProps({
   weapon: { type: Object, required: true },
   initial: { type: Object, default: null },
   teamModeLabel: { type: String, required: true },
-  saving: { type: Boolean, default: false }
+  saving: { type: Boolean, default: false },
+  isKnife: { type: Boolean, default: false },
+  isActiveKnife: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['close', 'save'])
 
 const search = ref('')
+const equipKnife = ref(true)
 const form = ref({
   paintId: 0,
   wear: 0.0001,
@@ -128,8 +162,9 @@ const form = ref({
   stattrak: false
 })
 
-watch(() => [props.weapon, props.initial], () => {
+watch(() => [props.weapon, props.initial, props.isKnife], () => {
   search.value = ''
+  equipKnife.value = true
   form.value = {
     paintId: props.initial ? props.initial.weapon_paint_id : 0,
     wear: props.initial ? Number(props.initial.weapon_wear) : 0.0001,
@@ -138,6 +173,10 @@ watch(() => [props.weapon, props.initial], () => {
     stattrak: props.initial ? !!props.initial.weapon_stattrak : false
   }
 }, { immediate: true })
+
+const hasCustom = computed(() =>
+  !!props.initial || form.value.paintId !== 0 || !!form.value.nametag || !!form.value.stattrak
+)
 
 const filteredSkins = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -164,6 +203,17 @@ function wearLabel(w) {
   return '战痕累累'
 }
 
+function resetDefault() {
+  form.value = {
+    paintId: 0,
+    wear: 0.0001,
+    seed: 0,
+    nametag: '',
+    stattrak: false
+  }
+  submit()
+}
+
 function submit() {
   emit('save', {
     weapon_defindex: props.weapon.defindex,
@@ -172,7 +222,8 @@ function submit() {
     weapon_seed: Number(form.value.seed),
     weapon_nametag: form.value.nametag,
     weapon_stattrak: !!form.value.stattrak,
-    weapon_stattrak_count: 0
+    weapon_stattrak_count: 0,
+    equip_knife: props.isKnife && !!equipKnife.value
   })
 }
 </script>

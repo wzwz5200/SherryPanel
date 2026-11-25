@@ -44,7 +44,7 @@
           </div>
         </div>
 
-                <div v-if="meta.db_connected === false" class="settings-group" style="text-align:left;margin-top:14px;border-color:rgba(255,149,0,0.45);background:rgba(255,149,0,0.08);">
+        <div v-if="meta.db_connected === false" class="settings-group" style="text-align:left;margin-top:14px;border-color:rgba(255,149,0,0.45);background:rgba(255,149,0,0.08);">
           <div class="settings-row">
             <div style="font-size:13px;font-weight:700;color:var(--orange);">首次使用提示 · 服务器尚未初始化</div>
             <div style="font-size:12px;color:var(--label-secondary);line-height:1.55;margin-top:4px;">
@@ -59,7 +59,7 @@
           </div>
         </div>
 
-<div style="margin-top:18px;display:flex;flex-direction:column;gap:10px;">
+        <div style="margin-top:18px;display:flex;flex-direction:column;gap:10px;">
           <input
             v-model="pairCode"
             class="code-input"
@@ -109,12 +109,12 @@
             <button class="nav-item" :class="{ active: tab === 'weapons' }" @click="tab = 'weapons'">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M3 10h13l3-2h2v4h-3l-2 2h-4l-1 4H8l1-4H3z" /></svg>
               <span>武器皮肤</span>
-              <span class="nav-count">{{ catalog.weapons.length }}</span>
+              <span class="nav-count">{{ gunWeapons.length }}</span>
             </button>
             <button class="nav-item" :class="{ active: tab === 'knives' }" @click="tab = 'knives'">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M19 5 5 19" /><path d="M14 5h5v5" /><path d="m7 17-3 3" /></svg>
-              <span>匕首类型</span>
-              <span class="nav-count">{{ catalog.knives.length }}</span>
+              <span>匕首</span>
+              <span class="nav-count">{{ knifeWeapons.length }}</span>
             </button>
             <button class="nav-item" :class="{ active: tab === 'gloves' }" @click="tab = 'gloves'">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M18 11V6a2 2 0 0 0-4 0v4" /><path d="M14 10V4a2 2 0 0 0-4 0v6" /><path d="M10 10.5V6a2 2 0 0 0-4 0v8a6 6 0 0 0 12 0v-3a2 2 0 0 0-4 0" /></svg>
@@ -179,10 +179,11 @@
         </header>
 
         <main class="content">
+          <!-- GUN SKINS TAB -->
           <section v-if="tab === 'weapons'">
             <div class="page-header">
               <div>
-                <h1 class="page-title">武器与匕首皮肤</h1>
+                <h1 class="page-title">武器皮肤</h1>
                 <p class="page-subtitle">仅对你已认证的账号生效，点击保存即自动刷新游戏内皮肤（无需手动输入 !wp）</p>
               </div>
               <div class="segmented">
@@ -191,9 +192,101 @@
                 </button>
               </div>
             </div>
-            <div class="grid">
+            <div v-if="filteredWeapons.length" class="grid">
               <div v-for="w in filteredWeapons" :key="w.defindex" class="card" :class="{ equipped: !!equippedSkin(w.defindex) }" @click="modalWeapon = w">
                 <span v-if="equippedSkin(w.defindex)" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
+                <div class="card-art"><img :src="weaponCardImage(w)" :alt="w.display_name" loading="lazy" /></div>
+                <div>
+                  <div class="card-title">{{ w.display_name }}</div>
+                  <div class="card-subtitle">{{ weaponCardSkinName(w) }}</div>
+                  <div class="card-pills" v-if="equippedSkin(w.defindex) || isTeamDiffSkin(w.defindex)">
+                    <span v-if="equippedSkin(w.defindex)" class="pill-tag blue tabular">{{ formatWear(equippedSkin(w.defindex).weapon_wear) }}</span>
+                    <span v-if="equippedSkin(w.defindex)" class="pill-tag tabular">#{{ equippedSkin(w.defindex).weapon_seed }}</span>
+                    <span v-if="equippedSkin(w.defindex)?.weapon_stattrak" class="pill-tag orange">ST™</span>
+                    <span v-if="isTeamDiffSkin(w.defindex)" class="pill-tag">T/CT 不同</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-state">
+              <div>未找到匹配「{{ searchQuery }}」的武器或涂装</div>
+              <button class="btn btn-sm btn-tinted" @click="searchQuery = ''; weaponCat = 'all'">重置筛选与搜索</button>
+            </div>
+          </section>
+
+          <!-- UNIFIED KNIFE TAB -->
+          <section v-else-if="tab === 'knives'">
+            <div class="page-header">
+              <div>
+                <h1 class="page-title">匕首与涂装</h1>
+                <p class="page-subtitle">每次只能手持 1 把主战匕首（{{ teamModeLabel }}），点击任意匕首卡片即可原地定制涂装并自动装备</p>
+              </div>
+            </div>
+
+            <div class="active-knife-bar">
+              <div class="active-knife-main">
+                <div class="active-knife-thumb">
+                  <img v-if="currentKnifeWeapon" :src="weaponCardImage(currentKnifeWeapon)" :alt="currentKnifeWeapon.display_name" />
+                  <span v-else style="font-size:12px;color:var(--label-tertiary);">原版刀</span>
+                </div>
+                <div style="min-width:0;">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span class="pill-tag green">当前使用中</span>
+                    <span v-if="hasTeamKnifeSplit" class="pill-tag orange">T / CT 阵营刀型不同</span>
+                  </div>
+                  <div class="active-knife-title">{{ activeKnifeHeadline }}</div>
+                  <div class="active-knife-sub">
+                    <template v-if="currentKnifeWeapon">
+                      涂装：{{ weaponCardSkinName(currentKnifeWeapon) }}
+                      <template v-if="equippedSkin(currentKnifeWeapon.defindex)">
+                        · 磨损 {{ formatWear(equippedSkin(currentKnifeWeapon.defindex).weapon_wear) }}
+                        · #{{ equippedSkin(currentKnifeWeapon.defindex).weapon_seed }}
+                      </template>
+                    </template>
+                    <template v-else>
+                      未装备定制匕首，当前使用 CS2 阵营默认原版匕首
+                    </template>
+                  </div>
+                </div>
+              </div>
+              <div class="active-knife-actions">
+                <button v-if="currentKnifeWeapon" class="btn btn-accent" @click="modalWeapon = currentKnifeWeapon">
+                  定制当前涂装
+                </button>
+                <button v-if="hasAnyCustomKnife" class="btn" @click="saveKnife('weapon_knife')">
+                  恢复默认原版刀
+                </button>
+              </div>
+            </div>
+
+            <div v-if="filteredKnifeWeapons.length || !searchQuery.trim()" class="grid">
+              <div v-if="!searchQuery.trim()" class="card" :class="{ equipped: isDefaultKnifeActive }" @click="saveKnife('weapon_knife')">
+                <span v-if="isDefaultKnifeActive" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
+                <span v-else-if="defaultKnifeTeamBadge" class="card-status-badge is-active">{{ defaultKnifeTeamBadge }}</span>
+                <div class="card-art" style="color:var(--label-tertiary);font-size:13px;">默认原版</div>
+                <div>
+                  <div class="card-title">默认原版匕首</div>
+                  <div class="card-subtitle">恢复阵营初始刀型</div>
+                  <div class="knife-card-footer">
+                    <span v-if="isDefaultKnifeActive" class="pill-tag green">使用中</span>
+                    <button v-else class="btn btn-sm" @click.stop="saveKnife('weapon_knife')">切回原版</button>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-for="w in filteredKnifeWeapons"
+                :key="w.defindex"
+                class="card"
+                :class="{
+                  equipped: isKnifeActive(w.weapon_name),
+                  'saved-only': !isKnifeActive(w.weapon_name) && !!equippedSkin(w.defindex)
+                }"
+                @click="modalWeapon = w"
+              >
+                <span v-if="isKnifeActive(w.weapon_name)" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
+                <span v-else-if="equippedSkin(w.defindex)" class="card-status-badge is-saved">已存涂装</span>
+
                 <div class="card-art"><img :src="weaponCardImage(w)" :alt="w.display_name" loading="lazy" /></div>
                 <div>
                   <div class="card-title">{{ w.display_name }}</div>
@@ -203,40 +296,28 @@
                     <span class="pill-tag tabular">#{{ equippedSkin(w.defindex).weapon_seed }}</span>
                     <span v-if="equippedSkin(w.defindex).weapon_stattrak" class="pill-tag orange">ST™</span>
                   </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section v-else-if="tab === 'knives'">
-            <div class="page-header">
-              <div>
-                <h1 class="page-title">匕首类型</h1>
-                <p class="page-subtitle">当前装备：{{ currentKnifeLabel }}</p>
-              </div>
-            </div>
-            <div class="grid">
-              <div class="card" :class="{ equipped: !currentKnifeName }" @click="saveKnife('weapon_knife')">
-                <span v-if="!currentKnifeName" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
-                <div class="card-art" style="color:var(--label-tertiary);font-size:13px;">默认原版</div>
-                <div><div class="card-title">默认原版匕首</div><div class="card-subtitle">恢复阵营初始刀型</div></div>
-              </div>
-              <div v-for="k in filteredKnives" :key="k.weapon_name" class="card" :class="{ equipped: currentKnifeName === k.weapon_name }" @click="saveKnife(k.weapon_name)">
-                <span v-if="currentKnifeName === k.weapon_name" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
-                <div class="card-art"><img :src="k.image" :alt="k.display_name" loading="lazy" /></div>
-                <div>
-                  <div class="card-title">{{ k.display_name }}</div>
-                  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
-                    <span class="card-subtitle">{{ k.weapon_name.replace('weapon_', '') }}</span>
-                    <button class="btn btn-sm btn-tinted" @click.stop="jumpToKnifeSkin(k.defindex)">定制涂装</button>
+                  <div class="knife-card-footer">
+                    <template v-if="isKnifeActive(w.weapon_name)">
+                      <span class="pill-tag green">{{ knifeTeamBadge(w.weapon_name) }}</span>
+                      <button class="btn btn-sm btn-tinted" @click.stop="modalWeapon = w">换涂装</button>
+                    </template>
+                    <template v-else>
+                      <button class="btn btn-sm btn-accent" @click.stop="saveKnife(w.weapon_name)">装备此刀</button>
+                      <button class="btn btn-sm" @click.stop="modalWeapon = w">选涂装</button>
+                    </template>
                   </div>
                 </div>
               </div>
             </div>
+            <div v-else class="empty-state">
+              <div>未找到匹配「{{ searchQuery }}」的匕首或涂装</div>
+              <button class="btn btn-sm btn-tinted" @click="searchQuery = ''">清空搜索</button>
+            </div>
           </section>
 
+          <!-- GLOVES TAB -->
           <section v-else-if="tab === 'gloves'">
-            <div class="page-header"><div><h1 class="page-title">手套</h1><p class="page-subtitle">调节磨损后点击即可同步</p></div></div>
+            <div class="page-header"><div><h1 class="page-title">手套</h1><p class="page-subtitle">调节磨损后点击即可自动同步到游戏</p></div></div>
             <div class="inline-bar">
               <span style="font-size:13px;font-weight:500;">手套磨损</span>
               <input type="range" min="0.0001" max="0.80" step="0.001" v-model.number="gloveWear" style="width:160px;" />
@@ -245,15 +326,26 @@
               <button class="btn btn-sm" @click="gloveWear = 0.075">略有磨损</button>
               <button class="btn btn-sm" @click="gloveWear = 0.16">久经沙场</button>
             </div>
-            <div class="grid">
+            <div v-if="filteredGloves.length" class="grid">
               <div v-for="g in filteredGloves" :key="g.weapon_defindex + '-' + g.paint" class="card" :class="{ equipped: isGloveEquipped(g) }" @click="saveGlove(g)">
                 <span v-if="isGloveEquipped(g)" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
                 <div class="card-art"><img v-if="g.image" :src="g.image" :alt="g.name" loading="lazy" /><span v-else style="font-size:13px;color:var(--label-tertiary);">默认原版</span></div>
-                <div class="card-title">{{ g.name }}</div><div v-if="g.name_en && g.name_en !== g.name" class="card-subtitle">{{ g.name_en }}</div>
+                <div>
+                  <div class="card-title">{{ g.name }}</div>
+                  <div v-if="g.name_en && g.name_en !== g.name" class="card-subtitle">{{ g.name_en }}</div>
+                  <div v-if="isGloveEquipped(g) && g.weapon_defindex !== 0 && equippedSkin(g.weapon_defindex)" class="card-pills">
+                    <span class="pill-tag blue tabular">{{ formatWear(equippedSkin(g.weapon_defindex).weapon_wear) }}</span>
+                  </div>
+                </div>
               </div>
+            </div>
+            <div v-else class="empty-state">
+              <div>未找到匹配「{{ searchQuery }}」的手套</div>
+              <button class="btn btn-sm btn-tinted" @click="searchQuery = ''">清空搜索</button>
             </div>
           </section>
 
+          <!-- AGENTS TAB -->
           <section v-else-if="tab === 'agents'">
             <div class="page-header">
               <div><h1 class="page-title">探员</h1><p class="page-subtitle">分别定制 T 与 CT 阵营模型</p></div>
@@ -262,34 +354,48 @@
                 <button :class="{ active: agentTeam === 3 }" @click="agentTeam = 3">CT 阵营</button>
               </div>
             </div>
-            <div class="grid">
+            <div v-if="filteredAgents.length" class="grid">
               <div v-for="a in filteredAgents" :key="a.team + '-' + a.model" class="card" :class="{ equipped: currentAgentModel === a.model }" @click="saveAgent(a)">
                 <span v-if="currentAgentModel === a.model" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
                 <div class="card-art"><img v-if="a.image" :src="a.image" :alt="a.name" loading="lazy" /><span v-else style="font-size:13px;color:var(--label-tertiary);">默认探员</span></div>
                 <div class="card-title">{{ a.name }}</div><div v-if="a.name_en && a.name_en !== a.name" class="card-subtitle">{{ a.name_en }}</div>
               </div>
             </div>
+            <div v-else class="empty-state">
+              <div>未找到匹配「{{ searchQuery }}」的探员</div>
+              <button class="btn btn-sm btn-tinted" @click="searchQuery = ''">清空搜索</button>
+            </div>
           </section>
 
+          <!-- MUSIC TAB -->
           <section v-else-if="tab === 'music'">
-            <div class="page-header"><div><h1 class="page-title">音乐盒</h1><p class="page-subtitle">点击即装备</p></div></div>
-            <div class="grid">
+            <div class="page-header"><div><h1 class="page-title">音乐盒</h1><p class="page-subtitle">点击即装备并自动同步到游戏</p></div></div>
+            <div v-if="filteredMusic.length" class="grid">
               <div v-for="m in filteredMusic" :key="m.id" class="card" :class="{ equipped: currentMusicId === m.id }" @click="saveMusic(m.id)">
                 <span v-if="currentMusicId === m.id" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
                 <div class="card-art"><img v-if="m.image" :src="m.image" :alt="m.name" loading="lazy" /><span v-else style="font-size:13px;color:var(--label-tertiary);">默认原声</span></div>
                 <div class="card-title">{{ m.name }}</div><div v-if="m.name_en && m.name_en !== m.name" class="card-subtitle">{{ m.name_en }}</div>
               </div>
             </div>
+            <div v-else class="empty-state">
+              <div>未找到匹配「{{ searchQuery }}」的音乐盒</div>
+              <button class="btn btn-sm btn-tinted" @click="searchQuery = ''">清空搜索</button>
+            </div>
           </section>
 
+          <!-- PINS TAB -->
           <section v-else-if="tab === 'pins'">
-            <div class="page-header"><div><h1 class="page-title">收藏徽章</h1><p class="page-subtitle">默认展示前 120 项，顶部搜索可检索全部</p></div></div>
-            <div class="grid">
+            <div class="page-header"><div><h1 class="page-title">收藏徽章</h1><p class="page-subtitle">默认展示前 120 项，顶部搜索可检索全部中英文徽章</p></div></div>
+            <div v-if="filteredPins.length" class="grid">
               <div v-for="p in filteredPins" :key="p.id" class="card" :class="{ equipped: currentPinId === p.id }" @click="savePin(p.id)">
                 <span v-if="currentPinId === p.id" class="card-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5" /></svg></span>
                 <div class="card-art"><img v-if="p.image" :src="p.image" :alt="p.name" loading="lazy" /><span v-else style="font-size:13px;color:var(--label-tertiary);">无徽章</span></div>
-                <div class="card-title">{{ p.name }}</div>
+                <div class="card-title">{{ p.name }}</div><div v-if="p.name_en && p.name_en !== p.name" class="card-subtitle">{{ p.name_en }}</div>
               </div>
+            </div>
+            <div v-else class="empty-state">
+              <div>未找到匹配「{{ searchQuery }}」的收藏徽章</div>
+              <button class="btn btn-sm btn-tinted" @click="searchQuery = ''">清空搜索</button>
             </div>
           </section>
         </main>
@@ -301,6 +407,8 @@
         :initial="equippedSkin(modalWeapon.defindex)"
         :team-mode-label="teamModeLabel"
         :saving="saving"
+        :is-knife="modalWeapon.category === 'knives'"
+        :is-active-knife="modalWeapon.category === 'knives' && isKnifeActive(modalWeapon.weapon_name)"
         @close="modalWeapon = null"
         @save="saveWeaponSkin"
       />
@@ -313,7 +421,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import SkinSheet from './components/SkinSheet.vue'
 import AdminApp from './components/AdminApp.vue'
 
@@ -341,20 +449,36 @@ const toast = ref({ show: false, msg: '', error: false })
 let toastTimer = null
 
 const weaponCategories = [
-  { key: 'all', label: '全部' }, { key: 'rifles', label: '步枪' },
-  { key: 'snipers', label: '狙击' }, { key: 'pistols', label: '手枪' },
-  { key: 'smgs', label: '冲锋枪' }, { key: 'heavy', label: '重武器' },
-  { key: 'knives', label: '匕首' }
+  { key: 'all', label: '全部' },
+  { key: 'rifles', label: '步枪' },
+  { key: 'snipers', label: '狙击' },
+  { key: 'pistols', label: '手枪' },
+  { key: 'smgs', label: '冲锋枪' },
+  { key: 'heavy', label: '重武器' }
 ]
 
 const searchPlaceholder = computed(() => ({
-  weapons: '搜索武器或涂装', knives: '搜索匕首', gloves: '搜索手套',
-  agents: '搜索探员', music: '搜索音乐盒', pins: '搜索徽章'
+  weapons: '搜索武器或涂装（支持中英文/如 巨龙传说）',
+  knives: '搜索匕首或涂装（如 蝴蝶刀 / 多普勒）',
+  gloves: '搜索手套（中英文）',
+  agents: '搜索探员（中英文）',
+  music: '搜索音乐盒（中英文）',
+  pins: '搜索徽章（中英文）'
 }[tab.value] || '搜索'))
 
 const teamModeLabel = computed(() =>
   teamMode.value === 2 ? '仅 T 阵营' : teamMode.value === 3 ? '仅 CT 阵营' : 'T + CT 双阵营'
 )
+
+watch(tab, () => {
+  searchQuery.value = ''
+})
+
+watch(teamMode, (v) => {
+  if (v === 2 || v === 3) {
+    agentTeam.value = v
+  }
+})
 
 function setTheme(t) {
   theme.value = t
@@ -368,10 +492,23 @@ function showToast(msg, error = false) {
   toastTimer = setTimeout(() => { toast.value.show = false }, 2800)
 }
 
-function activeSkinsMap() {
-  return teamMode.value === 3 ? (loadout.value.skins_ct || {}) : (loadout.value.skins_t || {})
+function equippedSkin(defindex) {
+  const t = loadout.value.skins_t || {}
+  const ct = loadout.value.skins_ct || {}
+  if (teamMode.value === 3) return ct[defindex] || null
+  if (teamMode.value === 2) return t[defindex] || null
+  return t[defindex] || ct[defindex] || null
 }
-function equippedSkin(defindex) { return activeSkinsMap()[defindex] || null }
+
+function isTeamDiffSkin(defindex) {
+  if (teamMode.value !== 0) return false
+  const t = (loadout.value.skins_t || {})[defindex]
+  const ct = (loadout.value.skins_ct || {})[defindex]
+  if (!t && !ct) return false
+  if (!t || !ct) return true
+  return t.weapon_paint_id !== ct.weapon_paint_id
+}
+
 function weaponCardImage(w) {
   const eq = equippedSkin(w.defindex)
   if (eq) {
@@ -380,63 +517,163 @@ function weaponCardImage(w) {
   }
   return w.default_image
 }
+
 function weaponCardSkinName(w) {
   const eq = equippedSkin(w.defindex)
   if (!eq) return '默认原版'
   const f = w.skins.find(s => s.paint_id === eq.weapon_paint_id)
   return f ? f.short_name : `涂装 #${eq.weapon_paint_id}`
 }
+
 function formatWear(w) { return Number(w ?? 0).toFixed(3) }
+
+function matchesWeaponQuery(w, q) {
+  if (!q) return true
+  if (
+    w.display_name.toLowerCase().includes(q) ||
+    w.weapon_name.toLowerCase().includes(q) ||
+    (w.display_name_en || '').toLowerCase().includes(q) ||
+    weaponCardSkinName(w).toLowerCase().includes(q)
+  ) {
+    return true
+  }
+  return (w.skins || []).some(s =>
+    s.short_name.toLowerCase().includes(q) ||
+    s.name.toLowerCase().includes(q) ||
+    (s.short_name_en || '').toLowerCase().includes(q) ||
+    (s.name_en || '').toLowerCase().includes(q) ||
+    String(s.paint_id) === q
+  )
+}
+
+const gunWeapons = computed(() =>
+  catalog.value.weapons.filter(w => w.category !== 'knives')
+)
+
+const knifeWeapons = computed(() =>
+  catalog.value.weapons.filter(w => w.category === 'knives')
+)
 
 const filteredWeapons = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  return catalog.value.weapons.filter(w =>
+  return gunWeapons.value.filter(w =>
     (weaponCat.value === 'all' || w.category === weaponCat.value) &&
-    (!q || w.display_name.toLowerCase().includes(q) || w.weapon_name.toLowerCase().includes(q) || weaponCardSkinName(w).toLowerCase().includes(q) || (w.display_name_en || '').toLowerCase().includes(q))
+    matchesWeaponQuery(w, q)
   )
 })
-const currentKnifeName = computed(() => teamMode.value === 3 ? loadout.value.knife_ct : loadout.value.knife_t)
-const currentKnifeLabel = computed(() => {
-  if (!currentKnifeName.value) return '默认原版匕首'
-  const k = catalog.value.knives.find(x => x.weapon_name === currentKnifeName.value)
-  return k ? k.display_name : currentKnifeName.value
-})
-const filteredKnives = computed(() => {
+
+const filteredKnifeWeapons = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  return catalog.value.knives.filter(k => !q || k.display_name.toLowerCase().includes(q) || k.weapon_name.toLowerCase().includes(q) || (k.display_name_en || '').toLowerCase().includes(q))
+  return knifeWeapons.value.filter(w => matchesWeaponQuery(w, q))
 })
+
+const knifeT = computed(() => loadout.value.knife_t || '')
+const knifeCT = computed(() => loadout.value.knife_ct || '')
+const hasTeamKnifeSplit = computed(() => teamMode.value === 0 && knifeT.value !== knifeCT.value)
+const hasAnyCustomKnife = computed(() => {
+  if (teamMode.value === 2) return !!knifeT.value
+  if (teamMode.value === 3) return !!knifeCT.value
+  return !!knifeT.value || !!knifeCT.value
+})
+
+const currentKnifeName = computed(() => {
+  if (teamMode.value === 3) return knifeCT.value
+  if (teamMode.value === 2) return knifeT.value
+  return knifeT.value || knifeCT.value
+})
+
+const currentKnifeWeapon = computed(() => {
+  if (!currentKnifeName.value) return null
+  return knifeWeapons.value.find(w => w.weapon_name === currentKnifeName.value) || null
+})
+
+function knifeDisplayByWeaponName(wn) {
+  if (!wn) return '默认原版匕首'
+  const k = knifeWeapons.value.find(x => x.weapon_name === wn) || catalog.value.knives.find(x => x.weapon_name === wn)
+  return k ? k.display_name : wn
+}
+
+const activeKnifeHeadline = computed(() => {
+  if (hasTeamKnifeSplit.value) {
+    return `T：${knifeDisplayByWeaponName(knifeT.value)} · CT：${knifeDisplayByWeaponName(knifeCT.value)}`
+  }
+  return knifeDisplayByWeaponName(currentKnifeName.value)
+})
+
+const isDefaultKnifeActive = computed(() => {
+  if (teamMode.value === 2) return !knifeT.value
+  if (teamMode.value === 3) return !knifeCT.value
+  return !knifeT.value && !knifeCT.value
+})
+
+const defaultKnifeTeamBadge = computed(() => {
+  if (teamMode.value !== 0) return ''
+  if (!knifeT.value && knifeCT.value) return 'T 原版中'
+  if (knifeT.value && !knifeCT.value) return 'CT 原版中'
+  return ''
+})
+
+function knifeTeamBadge(weaponName) {
+  if (teamMode.value === 2) return knifeT.value === weaponName ? '使用中' : ''
+  if (teamMode.value === 3) return knifeCT.value === weaponName ? '使用中' : ''
+  const onT = knifeT.value === weaponName
+  const onCT = knifeCT.value === weaponName
+  if (onT && onCT) return '使用中'
+  if (onT) return 'T 使用中'
+  if (onCT) return 'CT 使用中'
+  return ''
+}
+
+function isKnifeActive(weaponName) {
+  return !!knifeTeamBadge(weaponName)
+}
+
 const filteredGloves = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   return catalog.value.gloves.filter(g => !q || g.name.toLowerCase().includes(q) || (g.name_en || '').toLowerCase().includes(q))
 })
 function isGloveEquipped(g) {
-  const curDef = teamMode.value === 3 ? loadout.value.glove_ct : loadout.value.glove_t
+  const curDef = teamMode.value === 3
+    ? loadout.value.glove_ct
+    : teamMode.value === 2
+      ? loadout.value.glove_t
+      : (loadout.value.glove_t || loadout.value.glove_ct)
   if (g.weapon_defindex === 0) return !curDef
   if (curDef !== g.weapon_defindex) return false
   const skin = equippedSkin(g.weapon_defindex)
   return skin && skin.weapon_paint_id === g.paint
 }
+
 const currentAgentModel = computed(() => agentTeam.value === 3 ? (loadout.value.agent_ct || '') : (loadout.value.agent_t || ''))
 const filteredAgents = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   return catalog.value.agents.filter(a => a.team === agentTeam.value && (!q || a.name.toLowerCase().includes(q) || (a.name_en || '').toLowerCase().includes(q)))
 })
-const currentMusicId = computed(() => teamMode.value === 3 ? (loadout.value.music_ct || 0) : (loadout.value.music_t || 0))
+
+const currentMusicId = computed(() =>
+  teamMode.value === 3
+    ? (loadout.value.music_ct || 0)
+    : teamMode.value === 2
+      ? (loadout.value.music_t || 0)
+      : (loadout.value.music_t || loadout.value.music_ct || 0)
+)
 const filteredMusic = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   return catalog.value.music.filter(m => !q || m.name.toLowerCase().includes(q) || (m.name_en || '').toLowerCase().includes(q))
 })
-const currentPinId = computed(() => teamMode.value === 3 ? (loadout.value.pin_ct || 0) : (loadout.value.pin_t || 0))
+
+const currentPinId = computed(() =>
+  teamMode.value === 3
+    ? (loadout.value.pin_ct || 0)
+    : teamMode.value === 2
+      ? (loadout.value.pin_t || 0)
+      : (loadout.value.pin_t || loadout.value.pin_ct || 0)
+)
 const filteredPins = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   const list = catalog.value.pins.filter(p => !q || p.name.toLowerCase().includes(q) || (p.name_en || '').toLowerCase().includes(q))
   return q ? list.slice(0, 200) : list.slice(0, 120)
 })
-
-function jumpToKnifeSkin(defindex) {
-  const w = catalog.value.weapons.find(x => x.defindex === defindex)
-  if (w) { tab.value = 'weapons'; weaponCat.value = 'knives'; modalWeapon.value = w }
-}
 
 async function apiReq(url, opts = {}) {
   const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts })
@@ -475,56 +712,71 @@ async function saveWeaponSkin(payload) {
   saving.value = true
   try {
     const res = await apiReq('/api/loadout/skin', { method: 'PUT', body: JSON.stringify({ team: teamMode.value, ...payload }) })
-    loadout.value = res.loadout; modalWeapon.value = null
-    showToast(res.message || (res.auto_refreshed ? '已保存并自动刷新游戏内皮肤（无需输入 !wp）' : '已保存皮肤配置（进服后自动生效）'))
+    loadout.value = res.loadout
+    modalWeapon.value = null
+    if (payload.equip_knife) {
+      showToast(res.auto_refreshed ? '已切换装备此匕首并同步涂装（无需输入 !wp）' : '已切换装备此匕首并保存涂装，进服后自动生效')
+    } else {
+      showToast(res.message || (res.auto_refreshed ? '已保存并自动刷新游戏内皮肤（无需输入 !wp）' : '已保存皮肤配置（进服后自动生效）'))
+    }
   } catch (e) { showToast(e.message, true) } finally { saving.value = false }
 }
+
 async function saveKnife(knife) {
   try {
     const res = await apiReq('/api/loadout/knife', { method: 'PUT', body: JSON.stringify({ team: teamMode.value, knife }) })
-    loadout.value = res.loadout; showToast(res.message || (res.auto_refreshed ? '已切换匕首并自动刷新生效' : '已切换匕首，进服后自动生效'))
+    loadout.value = res.loadout
+    showToast(res.message || (res.auto_refreshed ? '已切换匕首并自动刷新生效' : '已切换匕首，进服后自动生效'))
   } catch (e) { showToast(e.message, true) }
 }
+
 async function saveGlove(g) {
   try {
     const res = await apiReq('/api/loadout/glove', { method: 'PUT', body: JSON.stringify({ team: teamMode.value, weapon_defindex: g.weapon_defindex, weapon_paint_id: g.paint, weapon_wear: gloveWear.value, weapon_seed: 0 }) })
-    loadout.value = res.loadout; showToast(res.message || (res.auto_refreshed ? '已更新手套并自动刷新生效' : '已更新手套，进服后自动生效'))
+    loadout.value = res.loadout
+    showToast(res.message || (res.auto_refreshed ? '已更新手套并自动刷新生效' : '已更新手套，进服后自动生效'))
   } catch (e) { showToast(e.message, true) }
 }
+
 async function saveAgent(a) {
   try {
     const res = await apiReq('/api/loadout/agent', { method: 'PUT', body: JSON.stringify({ team: a.team, model: a.model }) })
-    loadout.value = res.loadout; showToast(res.message || (res.auto_refreshed ? '已更新探员并自动刷新生效' : '已更新探员模型'))
+    loadout.value = res.loadout
+    showToast(res.message || (res.auto_refreshed ? '已更新探员并自动刷新生效' : '已更新探员模型'))
   } catch (e) { showToast(e.message, true) }
 }
+
 async function saveMusic(id) {
   try {
     const res = await apiReq('/api/loadout/music', { method: 'PUT', body: JSON.stringify({ team: teamMode.value, music_id: id }) })
-    loadout.value = res.loadout; showToast(res.message || (res.auto_refreshed ? '已更新音乐盒并自动刷新生效' : '已更新音乐盒，进服后自动生效'))
+    loadout.value = res.loadout
+    showToast(res.message || (res.auto_refreshed ? '已更新音乐盒并自动刷新生效' : '已更新音乐盒，进服后自动生效'))
   } catch (e) { showToast(e.message, true) }
 }
+
 async function savePin(id) {
   try {
     const res = await apiReq('/api/loadout/pin', { method: 'PUT', body: JSON.stringify({ team: teamMode.value, id }) })
-    loadout.value = res.loadout; showToast(res.message || (res.auto_refreshed ? '已更新徽章并自动刷新生效' : '已更新收藏徽章，进服后自动生效'))
+    loadout.value = res.loadout
+    showToast(res.message || (res.auto_refreshed ? '已更新徽章并自动刷新生效' : '已更新收藏徽章，进服后自动生效'))
   } catch (e) { showToast(e.message, true) }
 }
+
 async function resetAll() {
   if (!confirm('确定清空你的全部皮肤配置吗？')) return
   try {
     const res = await apiReq('/api/loadout', { method: 'DELETE' })
-    loadout.value = res.loadout; showToast(res.message || '已重置全部皮肤配置')
+    loadout.value = res.loadout
+    showToast(res.message || '已重置全部皮肤配置')
   } catch (e) { showToast(e.message, true) }
 }
+
 async function manualRefresh() {
   syncing.value = true
   try {
     const res = await apiReq('/api/loadout/refresh', { method: 'POST' })
     showToast(res.message || (res.auto_refreshed ? '已同步皮肤到游戏内' : '当前未在服内或待机，进服后将自动生效'))
   } catch (e) { showToast(e.message, true) } finally { syncing.value = false }
-}
-async function copyText(text, msg) {
-  try { await navigator.clipboard.writeText(text); showToast(msg) } catch { showToast(text) }
 }
 
 onMounted(async () => {

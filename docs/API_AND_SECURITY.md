@@ -69,7 +69,7 @@ v1.3.0 起，后端内置 `db.EnsureSchema()` 自动建表能力，并支持 Win
 | `POST /api/auth/redeem` | 公开（限流） | 请求体 `{"code":"123456"}` 或 `{"token":"..."}`，验证通过后写入 30 天 `HttpOnly` 玩家 Cookie 并作废一次性码 |
 | `POST /api/auth/logout` | 公开 | 清除当前浏览器玩家绑定 Cookie |
 | `GET /api/loadout` | **需玩家 Cookie** | 获取当前已认证玩家在 T 与 CT 阵营的全部 6 类装备配置 |
-| `PUT /api/loadout/skin` | **需玩家 Cookie** | 保存武器/匕首涂装（`team: 0双阵营/2T/3CT`、`weapon_defindex`、`weapon_paint_id`、`weapon_wear`、`weapon_seed`、`weapon_nametag`、`weapon_stattrak`），并自动触发 RCON 刷新返回 `auto_refreshed` |
+| `PUT /api/loadout/skin` | **需玩家 Cookie** | 保存武器/匕首涂装（`team: 0双阵营/2T/3CT`、`weapon_defindex`、`weapon_paint_id`、`weapon_wear`、`weapon_seed`、`weapon_nametag`、`weapon_stattrak`、`equip_knife` 可选自动装备该匕首），并自动触发 RCON 刷新返回 `auto_refreshed` |
 | `PUT /api/loadout/knife` | **需玩家 Cookie** | 切换匕首类型（`team`、`knife`）并自动 RCON 刷新 |
 | `PUT /api/loadout/glove` | **需玩家 Cookie** | 切换手套并同步写入 `wp_player_gloves` 与 `wp_player_skins`，自动 RCON 刷新 |
 | `PUT /api/loadout/agent` | **需玩家 Cookie** | 切换 T(`2`) 或 CT(`3`) 探员模型并自动 RCON 刷新 |

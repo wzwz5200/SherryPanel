@@ -252,10 +252,22 @@ func (s *Server) handleSetSkin(w http.ResponseWriter, r *http.Request) {
 		Nametag       string  `json:"weapon_nametag"`
 		StatTrak      bool    `json:"weapon_stattrak"`
 		StatTrakCount int     `json:"weapon_stattrak_count"`
+		EquipKnife    bool    `json:"equip_knife"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "请求格式错误")
 		return
+	}
+	if req.EquipKnife && s.Catalog != nil {
+		for _, k := range s.Catalog.Knives {
+			if k.DefIndex == req.DefIndex {
+				if err := st.SetKnife(sid, req.Team, k.WeaponName); err != nil {
+					writeErr(w, 500, err.Error())
+					return
+				}
+				break
+			}
+		}
 	}
 	err := st.SetSkin(sid, req.Team, db.SkinRecord{
 		DefIndex:      req.DefIndex,

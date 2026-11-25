@@ -828,3 +828,109 @@ input[type="range"] {
   border-color: var(--accent);
   box-shadow: 0 0 0 4px var(--accent-tint);
 }
+
+/* Unified Knife Tab & Status Distinction */
+.card.saved-only {
+  border-color: var(--separator-strong);
+}
+
+.card-status-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.1px;
+}
+.card-status-badge.is-saved {
+  background: var(--bg-fill);
+  color: var(--label-secondary);
+}
+.card-status-badge.is-active {
+  background: rgba(52, 199, 89, 0.16);
+  color: var(--green);
+}
+
+.pill-tag.green {
+  background: rgba(52, 199, 89, 0.16);
+  color: var(--green);
+  font-weight: 600;
+}
+
+.active-knife-bar {
+  background: var(--bg-surface);
+  border: 0.5px solid var(--separator);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.active-knife-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  flex: 1;
+}
+.active-knife-thumb {
+  width: 88px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 6px;
+}
+.active-knife-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.active-knife-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  margin-top: 4px;
+}
+.active-knife-sub {
+  font-size: 12.5px;
+  color: var(--label-secondary);
+  margin-top: 2px;
+}
+.active-knife-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.knife-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.empty-state {
+  background: var(--bg-surface);
+  border: 0.5px solid var(--separator);
+  border-radius: var(--radius-lg);
+  padding: 42px 24px;
+  text-align: center;
+  color: var(--label-secondary);
+  font-size: 13.5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
